@@ -10,7 +10,7 @@ from sklearn.svm import SVC
 
 import config # Import configuration
 
-def build_pipeline(model):
+def build_pipeline(model, pca_components=None):
     """
     Builds the standard ML pipeline with imputation, scaling, optional PCA, and model.
 
