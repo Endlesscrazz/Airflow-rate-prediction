@@ -13,7 +13,9 @@ import data_utils
 import feature_engineering
 import modeling
 import plotting
+import tuning
 
+from modeling import get_classifiers
 # Import sklearn components
 from sklearn.model_selection import LeaveOneOut, StratifiedKFold
 from sklearn.preprocessing import LabelEncoder
@@ -62,12 +64,14 @@ def run_experiment():
             cnn_base_model,
             target_size=config.CNN_INPUT_SIZE
         )
+        handcrafted_feats = feature_engineering.extract_handcrafted_features(sample["frames"])
 
-        if cnn_features_vector is not None:
+        if cnn_features_vector is not None and handcrafted_feats is not None:
             # Combine with delta_T and label
             combined_features = {
                 # Create feature names dynamically or use a prefix
                 **{f"cnn_{j}": val for j, val in enumerate(cnn_features_vector)},
+                **handcrafted_feats,
                 "delta_T": sample["delta_T"],
                 "airflow_rate": sample["airflow_rate"]
             }
@@ -104,8 +108,16 @@ def run_experiment():
 
     le = LabelEncoder()
     df["airflow_rate_encoded"] = le.fit_transform(df["airflow_rate"].astype(str))
-    X = df.drop(columns=["airflow_rate"])
+    X = df.drop(columns=["airflow_rate", "airflow_rate_encoded"])
     y = df["airflow_rate_encoded"]
+
+    best_params, best_score = tuning.run_grid_search(X, y, classifier_name="RandomForest")
+    print("Best PCA parameter from grid search:", best_params)
+    print("Best cross-validated F1-score:", best_score)
+
+    pca_setting = best_params.get("pca__n_components", None)
+
+    pipeline = modeling.build_pipeline(get_classifiers()["RandomForest"], pca_components=pca_setting)
 
     if X.empty or X.shape[1] == 0:
         print("Error: Feature matrix X is empty after processing.")
@@ -136,7 +148,7 @@ def run_experiment():
     print("\n--- Running Cross-Validation ---")
     for name, model in classifiers.items():
         print(f"Evaluating model: {name}...")
-        pipeline = modeling.build_pipeline(model) # Build pipeline with Imputer, Scaler, optional PCA
+        pipeline = modeling.build_pipeline(model, pca_components=pca_setting) # Build pipeline with Imputer, Scaler, optional PCA
         all_preds = np.array([-1.0] * len(y)); all_actuals = np.array(y.copy())
         fold_count = 0
         try:
@@ -171,7 +183,8 @@ def run_experiment():
 
     # 8. Train Final Model on All Data (Same as before)
     print(f"\n--- Training final {best_model_name} model on all data ---")
-    final_model_instance = modeling.get_classifiers()[best_model_name]; final_pipeline = modeling.build_pipeline(final_model_instance)
+    final_model_instance = modeling.get_classifiers()[best_model_name]
+    final_pipeline = modeling.build_pipeline(final_model_instance, pca_components=pca_setting)
     try:
         # Final check for PCA components relative to full dataset if PCA enabled
         if 'pca' in final_pipeline.named_steps and isinstance(final_pipeline.named_steps['pca'].n_components, int):
