@@ -17,12 +17,12 @@ CNN_INPUT_SIZE = (224, 224)
 
 # --- Model Parameters ---
 RANDOM_STATE = 42  # For reproducibility
-PCA_N_COMPONENTS = 0.95 # Retain 95% variance, set to None to disable PCA
+PCA_N_COMPONENTS = None #0.95 # Retain 95% variance, set to None to disable PCA
 N_ESTIMATORS = 100 # For RandomForest and GradientBoosting
 
 # --- Cross-Validation ---
 CV_METHOD = 'LeaveOneOut' # Options: 'LeaveOneOut', 'StratifiedKFold'
-K_FOLDS = 5 # Used only if CV_METHOD is 'StratifiedKFold'
+#K_FOLDS = 5 # Used only if CV_METHOD is 'StratifiedKFold'
 
 # --- Evaluation ---
 # Metric to choose the best model for final training and plotting

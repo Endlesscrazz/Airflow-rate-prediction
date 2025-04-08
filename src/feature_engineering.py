@@ -2,200 +2,232 @@
 """Functions for extracting features from raw video frames."""
 
 import numpy as np
-import config
+import warnings
+from scipy.stats import skew, kurtosis # Import skew and kurtosis
 
-# Attempt to import TensorFlow and handle import errors gracefully
+# --- TensorFlow Import Block (remains the same) ---
 try:
     import tensorflow as tf
     from tensorflow.keras.applications import MobileNetV2
     from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
-    from tensorflow.keras.layers import GlobalAveragePooling2D, Input
-    from tensorflow.keras.models import Model
-    # Use tf.image.resize which handles batches
-    # from tensorflow.keras.preprocessing.image import img_to_array, load_img # Less efficient for arrays
     TF_AVAILABLE = True
 except ImportError:
-    print("Warning: TensorFlow not found. CNN feature extraction will not be available.")
     TF_AVAILABLE = False
 except Exception as e:
     print(f"Warning: Error importing TensorFlow components: {e}")
     TF_AVAILABLE = False
+# --- End TensorFlow Import Block ---
 
+# --- load_cnn_base function (remains the same) ---
 def load_cnn_base(input_shape=(224, 224, 3)):
-    """
-    Loads the MobileNetV2 base model pre-trained on ImageNet.
-
-    Args:
-        input_shape (tuple): The expected input shape for the model (height, width, channels).
-
-    Returns:
-        tensorflow.keras.models.Model: The loaded base model, or None if TF is not available.
-    """
+    # ... (keep existing code) ...
     if not TF_AVAILABLE:
+        print("Error: Cannot load CNN base model, TensorFlow not available.")
         return None
+    try:
+        base_model = MobileNetV2(weights='imagenet', include_top=False,
+                                 input_shape=input_shape, pooling='avg')
+        base_model.trainable = False
+        print("Loaded MobileNetV2 base model with built-in Global Average Pooling and frozen weights.")
+        return base_model
+    except Exception as e:
+        print(f"Error loading MobileNetV2 model: {type(e).__name__} - {e}")
+        return None
+# --- End load_cnn_base ---
 
-    # Load MobileNetV2 without the top classification layer
-    base_model = MobileNetV2(weights='imagenet', include_top=False,
-                             input_shape=input_shape)
-    # We only need the base for feature extraction
-    base_model.trainable = False # Freeze the weights
-    print("Loaded MobileNetV2 base model with frozen weights.")
-    return base_model
-
+# --- extract_cnn_features function (remains the same) ---
 def extract_cnn_features(frames, cnn_base_model, target_size=(224, 224)):
-    """
-    Extracts features from video frames using a pre-trained CNN base model.
-
-    Args:
-        frames (np.ndarray): Video frames (num_frames, height, width). Assumed single channel (IR).
-        cnn_base_model (tf.keras.models.Model): The loaded pre-trained CNN base.
-        target_size (tuple): The target spatial size (height, width) for CNN input.
-
-    Returns:
-        np.ndarray: A single feature vector representing the video, or None if error.
-    """
+    # ... (keep existing code) ...
     if not TF_AVAILABLE or cnn_base_model is None:
-        print("Error: TensorFlow or CNN base model not available for feature extraction.")
+        print("Error: TensorFlow or CNN base model not available/loaded for feature extraction.")
         return None
     if not isinstance(frames, np.ndarray) or frames.ndim != 3 or frames.shape[0] == 0:
-        print("Warning: Invalid frames shape for CNN feature extraction.")
+        print(f"Warning: Invalid frames shape {getattr(frames, 'shape', 'N/A')} for CNN features. Returning None.")
         return None
 
-    num_frames = frames.shape[0]
-    preprocessed_frames = []
-
+    num_frames, h, w = frames.shape
     try:
-        # Preprocess each frame
-        for frame in frames:
-            # 1. Convert single channel IR frame to 3 channels by stacking
-            if frame.ndim == 2:
-                frame_rgb = np.stack((frame,) * 3, axis=-1)
-            elif frame.ndim == 3 and frame.shape[-1] == 1:
-                frame_rgb = np.concatenate([frame] * 3, axis=-1)
-            elif frame.ndim == 3 and frame.shape[-1] == 3:
-                 frame_rgb = frame # Assume already RGB if 3 channels
+        # Frame Preprocessing
+        normalized_frames = np.zeros_like(frames, dtype=np.float32)
+        for i, frame in enumerate(frames):
+            min_val, max_val = frame.min(), frame.max()
+            if max_val > min_val:
+                normalized_frames[i] = (frame - min_val) / (max_val - min_val) * 255.0
             else:
-                 print(f"Warning: Unexpected frame shape {frame.shape}. Skipping frame.")
-                 continue
+                normalized_frames[i] = np.zeros(frame.shape, dtype=np.float32)
+        frames_rgb = np.stack([normalized_frames] * 3, axis=-1)
+        frames_resized = tf.image.resize(tf.constant(frames_rgb, dtype=tf.float32), target_size)
+        frames_mobilenet_preprocessed = preprocess_input(frames_resized)
 
-            # 2. Resize frame using TensorFlow (handles potential non-standard sizes)
-            # Add batch dimension, resize, remove batch dimension
-            frame_resized = tf.image.resize(frame_rgb[np.newaxis, ...], target_size)[0]
+        # Feature Extraction
+        print(f"  Extracting CNN features from {num_frames} frames...")
+        @tf.function
+        def predict_features(data):
+             return cnn_base_model(data, training=False)
+        features_per_frame = predict_features(frames_mobilenet_preprocessed)
+        features_per_frame_np = features_per_frame.numpy()
 
-            preprocessed_frames.append(frame_resized)
-
-        if not preprocessed_frames:
-             print("Error: No frames could be preprocessed.")
-             return None
-
-        # Stack frames into a batch
-        batch_frames = np.stack(preprocessed_frames, axis=0)
-
-        # 3. Apply MobileNetV2-specific preprocessing
-        batch_preprocessed = preprocess_input(batch_frames)
-
-        # 4. Extract features using the CNN base
-        # Running predict in batches can be more memory efficient if needed
-        # For N=20 samples with likely short videos, processing all frames might be ok
-        print(f"  Extracting features from {batch_preprocessed.shape[0]} frames...")
-        features = cnn_base_model.predict(batch_preprocessed, verbose=0) # verbose=0 to reduce console spam
-
-        # 5. Aggregate features spatially (per frame) using Global Average Pooling
-        # Output shape after base is (num_frames, H', W', C') -> need (num_frames, C')
-        # We can do this manually after predict if the model doesn't include it
-        if features.ndim == 4: # Output includes spatial dims
-             pooled_features_per_frame = np.mean(features, axis=(1, 2))
-        elif features.ndim == 2: # Output might already be pooled if model structure implies it
-             pooled_features_per_frame = features
-        else:
-             print(f"Warning: Unexpected CNN output feature dimension: {features.ndim}. Returning None.")
-             return None
-
-        # 6. Aggregate features temporally (across frames) - Simple Averaging
-        # pooled_features_per_frame shape: (num_frames, num_cnn_features)
-        if pooled_features_per_frame.shape[0] > 0:
-            video_feature_vector = np.mean(pooled_features_per_frame, axis=0)
+        # Temporal Aggregation
+        if features_per_frame_np.shape[0] > 0:
+            video_feature_vector = np.mean(features_per_frame_np, axis=0)
         else:
             print("Warning: No frame features to aggregate temporally. Returning None.")
             return None
-
         return video_feature_vector.astype(np.float32)
 
     except Exception as e:
         print(f"Error during CNN feature extraction: {type(e).__name__} - {e}")
         import traceback
-        traceback.print_exc() # Print detailed traceback for debugging TF issues
+        traceback.print_exc()
         return None
+# --- End extract_cnn_features ---
 
 
 def extract_handcrafted_features(frames):
     """
-    Extracts simple statistical features from video frames.
+    Extracts simple statistical features from video frames, including skewness and kurtosis.
     Assumes frames is a numpy array (num_frames, height, width).
 
     Args:
         frames (np.ndarray): Video frames.
 
     Returns:
-        dict: A dictionary of extracted features. Returns NaNs if input is invalid.
+        dict: A dictionary of extracted features. Returns dict with NaNs if input is invalid.
     """
+    # Define ALL feature names FIRST
     feature_names = [
-        "mean_temp", "std_temp", "max_temp", "min_temp",
+        # Basic Stats
+        "mean_temp", "std_temp", "max_temp", "min_temp", "median_temp",
+        "q25_temp", "q75_temp",
+        # Skewness & Kurtosis of Temp Means
+        "skew_temp", "kurt_temp",
+        # Stats of Intra-Frame Variation
         "mean_frame_std", "std_frame_std",
-        "mean_temp_grad", "std_temp_grad",
-        "mean_spatial_grad", "std_spatial_grad"
+        "skew_frame_std", "kurt_frame_std", # Skew/Kurt of frame stds
+        # Temporal Gradient Stats
+        "mean_temp_grad", "std_temp_grad", "max_abs_temp_grad",
+        "skew_temp_grad", "kurt_temp_grad", # Skew/Kurt of temporal gradients
+        # Spatial Gradient Stats
+        "mean_spatial_grad", "std_spatial_grad", "max_spatial_grad",
+        "skew_spatial_grad", "kurt_spatial_grad" # Skew/Kurt of spatial gradients
     ]
 
-    if not isinstance(frames, np.ndarray) or frames.ndim != 3 or frames.shape[0] == 0 or frames.shape[1] == 0 or frames.shape[2] == 0:
-        print(f"Warning: Invalid frames shape {getattr(frames, 'shape', 'N/A')} for feature extraction. Returning NaNs.")
+    # Basic check for valid input
+    if not isinstance(frames, np.ndarray) or frames.ndim != 3 or frames.shape[0] < 1 or frames.shape[1] < 1 or frames.shape[2] < 1:
+        print(f"Warning: Invalid frames shape {getattr(frames, 'shape', 'N/A')} for handcrafted features. Returning NaNs.")
+        # Return dict with NaN for all expected features
         return {name: np.nan for name in feature_names}
 
     try:
         features = {}
+        num_frames = frames.shape[0]
 
-        # Overall intensity/temperature stats (mean over pixels, then stats over frames)
-        frame_means = np.mean(frames, axis=(1, 2))
-        frame_stds = np.std(frames, axis=(1, 2))
-        frame_maxs = np.max(frames, axis=(1, 2))
-        frame_mins = np.min(frames, axis=(1, 2))
+        # --- Per-Frame Stat Calculation ---
+        # Calculate per-frame stats first to get distributions over time
+        frame_means = np.array([np.mean(f) for f in frames])
+        frame_stds = np.array([np.std(f) for f in frames])
+        frame_maxs = np.array([np.max(f) for f in frames])
+        frame_mins = np.array([np.min(f) for f in frames])
+        frame_medians = np.array([np.median(f) for f in frames])
+        # Use nanpercentile to be robust to potential NaNs within a frame, though unlikely here
+        frame_q25 = np.array([np.nanpercentile(f, 25) for f in frames])
+        frame_q75 = np.array([np.nanpercentile(f, 75) for f in frames])
 
+        # Temporal gradient stats
+        if num_frames > 1:
+            temporal_diff = np.abs(np.diff(frames, axis=0))
+            temporal_grad_mean_per_diff = np.array([np.mean(diff) for diff in temporal_diff])
+        else:
+            # Assign empty array or placeholder that results in NaN/0 for stats below
+            temporal_grad_mean_per_diff = np.array([])
+
+        # Spatial gradient stats
+        spatial_grad_mags_mean_per_frame = []
+        spatial_grad_mags_max_per_frame = []
+        for frame in frames:
+             if frame.shape[0] > 1 and frame.shape[1] > 1:
+                 gy, gx = np.gradient(frame)
+                 grad_mag = np.sqrt(gx**2 + gy**2)
+                 spatial_grad_mags_mean_per_frame.append(np.mean(grad_mag))
+                 spatial_grad_mags_max_per_frame.append(np.max(grad_mag))
+             else:
+                 spatial_grad_mags_mean_per_frame.append(0.0)
+                 spatial_grad_mags_max_per_frame.append(0.0)
+        spatial_grad_mags_mean_per_frame = np.array(spatial_grad_mags_mean_per_frame)
+        spatial_grad_mags_max_per_frame = np.array(spatial_grad_mags_max_per_frame)
+        # --- End Per-Frame Stat Calculation ---
+
+
+        # --- Aggregate Stats Over Time ---
+
+        # Overall intensity/temperature stats
         features["mean_temp"] = np.mean(frame_means) if len(frame_means) > 0 else np.nan
         features["std_temp"] = np.std(frame_means) if len(frame_means) > 1 else 0.0
         features["max_temp"] = np.max(frame_maxs) if len(frame_maxs) > 0 else np.nan
         features["min_temp"] = np.min(frame_mins) if len(frame_mins) > 0 else np.nan
+        features["median_temp"] = np.median(frame_medians) if len(frame_medians) > 0 else np.nan
+        # Use mean instead of median for q25/q75 for consistency with mean_temp? Mean is fine.
+        features["q25_temp"] = np.mean(frame_q25) if len(frame_q25) > 0 else np.nan
+        features["q75_temp"] = np.mean(frame_q75) if len(frame_q75) > 0 else np.nan
+        # Skewness & Kurtosis of frame means
+        features["skew_temp"] = skew(frame_means) if len(frame_means) > 1 else 0.0
+        features["kurt_temp"] = kurtosis(frame_means, fisher=True) if len(frame_means) > 1 else 0.0 # Fisher=True -> normal=0
+
+        # Stats of the standard deviation within frames
         features["mean_frame_std"] = np.mean(frame_stds) if len(frame_stds) > 0 else np.nan
         features["std_frame_std"] = np.std(frame_stds) if len(frame_stds) > 1 else 0.0
+        # Skewness & Kurtosis of frame stds
+        features["skew_frame_std"] = skew(frame_stds) if len(frame_stds) > 1 else 0.0
+        features["kurt_frame_std"] = kurtosis(frame_stds, fisher=True) if len(frame_stds) > 1 else 0.0
 
         # Temporal gradient (frame difference) stats
-        if frames.shape[0] > 1:
-            temporal_diff = np.abs(np.diff(frames, axis=0))
-            temporal_grad_mean_per_frame = np.mean(temporal_diff, axis=(1, 2))
-            features["mean_temp_grad"] = np.mean(temporal_grad_mean_per_frame) if len(temporal_grad_mean_per_frame) > 0 else np.nan
-            features["std_temp_grad"] = np.std(temporal_grad_mean_per_frame) if len(temporal_grad_mean_per_frame) > 1 else 0.0
+        if num_frames > 1 and len(temporal_grad_mean_per_diff) > 0:
+            features["mean_temp_grad"] = np.mean(temporal_grad_mean_per_diff)
+            features["std_temp_grad"] = np.std(temporal_grad_mean_per_diff) if len(temporal_grad_mean_per_diff) > 1 else 0.0
+            features["max_abs_temp_grad"] = np.max(temporal_grad_mean_per_diff)
+            # Skewness & Kurtosis of temporal gradients
+            features["skew_temp_grad"] = skew(temporal_grad_mean_per_diff) if len(temporal_grad_mean_per_diff) > 1 else 0.0
+            features["kurt_temp_grad"] = kurtosis(temporal_grad_mean_per_diff, fisher=True) if len(temporal_grad_mean_per_diff) > 1 else 0.0
         else:
-            features["mean_temp_grad"] = 0.0 # No change if only one frame
+            # Assign 0 or NaN for consistency if no temporal diff possible/calculated
+            features["mean_temp_grad"] = 0.0
             features["std_temp_grad"] = 0.0
+            features["max_abs_temp_grad"] = 0.0
+            features["skew_temp_grad"] = 0.0 # Added default
+            features["kurt_temp_grad"] = 0.0 # Added default
 
-        # Spatial gradient stats
-        spatial_grad_mags_mean_per_frame = []
-        for frame in frames:
-            if frame.shape[0] > 1 and frame.shape[1] > 1:
-                 gy, gx = np.gradient(frame)
-                 grad_mag = np.sqrt(gx**2 + gy**2)
-                 spatial_grad_mags_mean_per_frame.append(np.mean(grad_mag))
-            else:
-                 spatial_grad_mags_mean_per_frame.append(0.0) # No gradient for 1D
-
+        # Aggregate spatial gradient stats over frames
         features["mean_spatial_grad"] = np.mean(spatial_grad_mags_mean_per_frame) if len(spatial_grad_mags_mean_per_frame) > 0 else np.nan
         features["std_spatial_grad"] = np.std(spatial_grad_mags_mean_per_frame) if len(spatial_grad_mags_mean_per_frame) > 1 else 0.0
+        features["max_spatial_grad"] = np.max(spatial_grad_mags_max_per_frame) if len(spatial_grad_mags_max_per_frame) > 0 else np.nan
+        # Skewness & Kurtosis of spatial gradients (mean magnitude per frame)
+        features["skew_spatial_grad"] = skew(spatial_grad_mags_mean_per_frame) if len(spatial_grad_mags_mean_per_frame) > 1 else 0.0
+        features["kurt_spatial_grad"] = kurtosis(spatial_grad_mags_mean_per_frame, fisher=True) if len(spatial_grad_mags_mean_per_frame) > 1 else 0.0
+        # --- End Aggregate Stats Over Time ---
 
-        # Check for any NaN/Inf values produced (should be handled by imputer later, but good to know)
+
+        # --- Final Checks ---
+        # Check for any NaN/Inf values produced by calculations
         for k, v in features.items():
             if not np.isfinite(v):
-                 print(f"Warning: Non-finite value {v} generated for feature '{k}'.")
+                 # Use a more specific warning message
+                 print(f"    Warning: Non-finite value ({v}) generated for feature '{k}'. Will be handled by imputer.")
+                 # Ensure NaNs remain NaN, don't replace with 0 here. Let imputer do its job.
+                 features[k] = np.nan # Explicitly set to NaN if non-finite
+
+        # Ensure all expected features are present, even if NaN (safeguard)
+        for name in feature_names:
+            if name not in features:
+                print(f"    Error: Feature '{name}' was not calculated. Setting to NaN.")
+                features[name] = np.nan
+        # --- End Final Checks ---
 
         return features
 
     except Exception as e:
-         print(f"Error during feature extraction: {type(e).__name__} - {e}. Returning NaNs.")
+         # Add more detail to error message
+         print(f"Error during handcrafted feature extraction (calculating stats): {type(e).__name__} - {e}. Returning NaNs for all features.")
+         import traceback
+         traceback.print_exc() # Print traceback for debugging
+         # Return dict with NaN for all expected features
          return {name: np.nan for name in feature_names}
