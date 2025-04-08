@@ -6,7 +6,7 @@ import seaborn as sns # Optional, makes plots nicer
 from sklearn.metrics import ConfusionMatrixDisplay
 import numpy as np
 
-def plot_confusion_matrix(cm, labels, title="Confusion Matrix", filepath=None):
+def plot_confusion_matrix(cm, labels, title="Confusion Matrix", filepath=None, save_path = None):
     """
     Plots a confusion matrix using Matplotlib/Seaborn.
 
