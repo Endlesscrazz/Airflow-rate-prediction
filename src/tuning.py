@@ -1,112 +1,139 @@
 # tuning.py
-"""Functions for hyperparameter tuning for multiple models at once."""
+"""Functions for hyperparameter tuning for regression models."""
 
-from sklearn.model_selection import GridSearchCV, LeaveOneOut, StratifiedKFold
+from sklearn.model_selection import GridSearchCV, LeaveOneOut, KFold # Use KFold for regression
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
-from modeling import get_classifiers  # To get classifier instances
+#from sklearn.ensemble import RandomForestRegressor # Example estimator used below
+from modeling import get_regressors # Import regressors
 import config
 import pandas as pd
+import numpy as np
 
-def run_grid_search(X, y, classifier_name="RandomForest"):
+def run_grid_search(X, y, regressor_name="RandomForestRegressor"):
     """
-    Performs GridSearchCV for a specific classifier.
+    Performs GridSearchCV for a specific regressor.
     The pipeline includes Imputer -> Scaler -> Model.
-    Hyperparameters for the model are tuned based on the classifier.
-    
+    Hyperparameters for the model are tuned based on the regressor.
+
     Args:
         X: Feature matrix.
-        y: Target vector.
-        classifier_name: Name of the classifier from get_classifiers() to use.
-        
+        y: Target vector (continuous).
+        regressor_name: Name of the regressor from get_regressors() to use.
+
     Returns:
-        tuple: (best_params, best_score) from the GridSearchCV.
+        tuple: (best_params, best_score) from the GridSearchCV. Score is neg_mean_squared_error.
     """
-    print(f"\n--- Running Grid Search for {classifier_name} ---")
+    print(f"\n--- Running Grid Search for {regressor_name} ---")
     try:
-        classifier = get_classifiers()[classifier_name]
+        regressor = get_regressors()[regressor_name]
     except KeyError:
-        print(f"Error: Classifier '{classifier_name}' not found in get_classifiers(). Using RandomForest.")
-        classifier = get_classifiers()["RandomForest"]
+        print(f"Error: Regressor '{regressor_name}' not found in get_regressors(). Using RandomForestRegressor.")
+        regressor = get_regressors()["RandomForestRegressor"]
 
     # Basic pipeline: Imputer -> Scaler -> Model
     pipeline = Pipeline([
         ('imputer', SimpleImputer(strategy='mean')),
         ('scaler', StandardScaler()),
-        ('model', classifier)
+        ('model', regressor)
     ])
 
-    # Define parameter grid based on classifier
-    if classifier_name == "RandomForest":
+    # Define parameter grid based on regressor
+    param_grid = {} # Default empty
+    if regressor_name == "Ridge":
         param_grid = {
-            'model__n_estimators': [50, 100, 150],
-            'model__max_depth': [3, 5, None],
-            'model__min_samples_split': [2, 5]
+            'model__alpha': [0.01, 0.1, 1.0, 10.0, 100.0] # Regularization strength
         }
-    elif classifier_name == "GradientBoosting":
+    elif regressor_name == "Lasso":
+         param_grid = {
+            'model__alpha': [0.001, 0.01, 0.1, 1.0, 10.0] # Regularization strength
+        }
+    elif regressor_name == "SVR":
         param_grid = {
-            'model__n_estimators': [50, 100, 150],
-            'model__learning_rate': [0.01, 0.1, 0.2],
-            'model__max_depth': [3, 5, None]
+            'model__C': [0.1, 1.0, 10.0, 100.0], # Regularization parameter
+            'model__kernel': ['linear', 'rbf'],
+            'model__epsilon': [0.01, 0.1, 0.5] # Margin of tolerance
+            # 'model__gamma': ['scale', 'auto'] # Only for 'rbf', 'poly', 'sigmoid'
         }
-    elif classifier_name == "SVC":
+    elif regressor_name == "RandomForestRegressor":
         param_grid = {
-            'model__C': [1.0, 5.0, 10.0, 15.0, 20.0],
-            'model__kernel': ['linear'],
-            #'model__gamma': ['scale', 'auto']
+            'model__n_estimators': [50, 100, 200],
+            'model__max_depth': [3, 5, 10, None],
+            'model__min_samples_split': [2, 5, 10]
         }
-    else:
-        param_grid = {}
-    
+    elif regressor_name == "GradientBoostingRegressor":
+         param_grid = {
+            'model__n_estimators': [50, 100, 200],
+            'model__learning_rate': [0.01, 0.05, 0.1],
+            'model__max_depth': [3, 5, 7]
+         }
+    # Add other regressors if needed
+
     if not param_grid:
-        print("Warning: Parameter grid is empty. GridSearch will only fit the default pipeline.")
-    
+        print(f"Warning: Parameter grid for {regressor_name} is empty. GridSearch will only fit the default pipeline.")
+
     # Determine CV strategy based on config
     if config.CV_METHOD == 'LeaveOneOut':
-        cv_strategy = LeaveOneOut()  # Use LeaveOneOut instance
-    elif config.CV_METHOD == 'StratifiedKFold':
-        min_class_count = pd.Series(y).value_counts().min()
-        n_splits = max(2, min(config.K_FOLDS, min_class_count))
-        cv_strategy = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=config.RANDOM_STATE)
+        cv_strategy = LeaveOneOut()
+        cv_name = "LeaveOneOut"
+    elif config.CV_METHOD == 'KFold':
+        # Use KFold for regression (StratifiedKFold is for classification)
+        n_splits = config.K_FOLDS
+        cv_strategy = KFold(n_splits=n_splits, shuffle=True, random_state=config.RANDOM_STATE)
+        cv_name = f"{n_splits}-Fold KFold"
     else:
-        print(f"Invalid CV_METHOD '{config.CV_METHOD}'. Defaulting to 5-fold StratifiedKFold.")
-        cv_strategy = StratifiedKFold(n_splits=5, shuffle=True, random_state=config.RANDOM_STATE)
+        print(f"Warning: Invalid CV_METHOD '{config.CV_METHOD}' for regression. Defaulting to 5-Fold KFold.")
+        cv_strategy = KFold(n_splits=5, shuffle=True, random_state=config.RANDOM_STATE)
+        cv_name = "5-Fold KFold"
 
-    print(f"Using {config.CV_METHOD} for GridSearch CV.")
-    
-    grid_search = GridSearchCV(pipeline, param_grid, cv=cv_strategy, scoring='f1_weighted', n_jobs=-1)
-    
+    # Use neg_mean_squared_error (higher is better, less negative) or r2
+    # MSE is often preferred for model selection as it directly penalizes large errors
+    scoring_metric = 'neg_mean_squared_error'
+    print(f"Using {cv_name} with '{scoring_metric}' scoring for GridSearch CV.")
+
+    grid_search = GridSearchCV(pipeline, param_grid, cv=cv_strategy, scoring=scoring_metric, n_jobs=-1)
+
     try:
         grid_search.fit(X, y)
-        print(f"GridSearch completed for {classifier_name}. Best Score (f1_weighted): {grid_search.best_score_:.4f}")
+        # Best score is neg_mse, convert back to positive MSE for reporting if desired
+        best_neg_mse = grid_search.best_score_
+        best_mse = -best_neg_mse if scoring_metric == 'neg_mean_squared_error' else None # Handle other metrics if used
+
+        print(f"GridSearch completed for {regressor_name}. Best Score ({scoring_metric}): {best_neg_mse:.4f}")
+        if best_mse is not None:
+             print(f"  Corresponding Best MSE: {best_mse:.4f}")
+             print(f"  Corresponding Best RMSE: {np.sqrt(best_mse):.4f}") # Also show RMSE
         if grid_search.best_params_:
-            print(f"Best Parameters for {classifier_name}: {grid_search.best_params_}")
+            print(f"Best Parameters for {regressor_name}: {grid_search.best_params_}")
         else:
             print("No hyperparameters were tuned (param_grid was empty).")
-        return grid_search.best_params_, grid_search.best_score_
+        # Return best params and the NEGATIVE MSE score (as GridSearchCV returns)
+        return grid_search.best_params_, best_neg_mse
     except Exception as e:
-        print(f"Error during GridSearchCV for {classifier_name}: {type(e).__name__} - {e}")
+        print(f"Error during GridSearchCV for {regressor_name}: {type(e).__name__} - {e}")
         import traceback
         traceback.print_exc()
-        return {}, -1.0
+        # Return default/error values, ensure score is comparable (e.g., large negative number for neg_mse)
+        return {}, -np.inf
 
+# Keep run_grid_search_all_models function (it calls the modified run_grid_search)
 def run_grid_search_all_models(X, y):
     """
-    Performs grid search for multiple models at once.
-    
+    Performs grid search for multiple regressors.
+
     Args:
         X: Feature matrix.
         y: Target vector.
-        
+
     Returns:
-        dict: A dictionary mapping each classifier name to its best parameters and score.
-              Example: {"RandomForest": {"best_params": {...}, "best_score": 0.45}, ...}
+        tuple: (all_best_params, all_best_scores) where scores are neg_mean_squared_error.
     """
-    results = {}
-    classifiers = get_classifiers()
-    for name in classifiers.keys():
-        best_params, best_score = run_grid_search(X, y, classifier_name=name)
-        results[name] = {"best_params": best_params, "best_score": best_score}
-    return results
+    all_best_params = {}
+    all_best_scores = {}
+    regressors = get_regressors()
+    for name in regressors.keys():
+        best_params, best_score = run_grid_search(X, y, regressor_name=name)
+        all_best_params[name] = best_params
+        all_best_scores[name] = best_score # Store the neg_mse score
+    return all_best_params, all_best_scores

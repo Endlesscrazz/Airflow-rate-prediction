@@ -1,46 +1,45 @@
 # plotting.py
-"""Functions for generating visualizations."""
+"""Plotting functions for the regression experiment."""
 
 import matplotlib.pyplot as plt
-import seaborn as sns # Optional, makes plots nicer
-from sklearn.metrics import ConfusionMatrixDisplay
 import numpy as np
+import seaborn as sns # Using seaborn for nicer plots
 
-def plot_confusion_matrix(cm, labels, title="Confusion Matrix", filepath=None, save_path = None):
+def plot_actual_vs_predicted(y_true, y_pred, title="Actual vs. Predicted", save_path=None):
     """
-    Plots a confusion matrix using Matplotlib/Seaborn.
+    Creates a scatter plot of actual vs predicted values with a diagonal line.
 
     Args:
-        cm (np.ndarray): Confusion matrix array.
-        labels (list): List of class labels for display.
+        y_true (array-like): True target values.
+        y_pred (array-like): Predicted target values.
         title (str): Title for the plot.
-        filepath (str, optional): If provided, saves the plot to this path. Defaults to None (show plot).
+        save_path (str, optional): Path to save the plot. If None, plot is shown.
     """
-    try:
-        plt.figure(figsize=(8, 6))
-        # Use seaborn heatmap for better visuals if available
-        if sns:
-            sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
-                        xticklabels=labels, yticklabels=labels, cbar=False)
-        else:
-            # Fallback to Matplotlib display
-             disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
-             disp.plot(cmap=plt.cm.Blues, values_format='d')
-             # disp.ax_.set_title(title) # Title set below works for both
+    plt.figure(figsize=(8, 8))
+    # Ensure input are numpy arrays for easier handling
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
 
-        plt.title(title)
-        plt.ylabel('Actual Label')
-        plt.xlabel('Predicted Label')
-        plt.xticks(rotation=45, ha='right')
-        plt.yticks(rotation=0)
-        plt.tight_layout() # Adjust layout
+    # Scatter plot
+    sns.scatterplot(x=y_true, y=y_pred, alpha=0.7)
 
-        if filepath:
-            plt.savefig(filepath)
-            print(f"Confusion matrix saved to {filepath}")
-        else:
-            plt.show()
-        plt.close() # Close the figure to prevent display issues in loops
+    # Diagonal line (y=x)
+    min_val = min(np.min(y_true), np.min(y_pred))
+    max_val = max(np.max(y_true), np.max(y_pred))
+    plt.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2, label='Ideal (y=x)')
 
-    except Exception as e:
-        print(f"Error during plotting confusion matrix: {type(e).__name__} - {e}")
+    # Labels and Title
+    plt.xlabel("Actual Airflow Rate")
+    plt.ylabel("Predicted Airflow Rate")
+    plt.title(title)
+    plt.legend()
+    plt.grid(True)
+    plt.axis('equal') # Ensure equal scaling for x and y axes
+    plt.tight_layout()
+
+    if save_path:
+        print(f"Saving plot to: {save_path}")
+        plt.savefig(save_path, dpi=300)
+        plt.close() # Close plot window if saving
+    else:
+        plt.show()

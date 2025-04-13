@@ -1,233 +1,173 @@
 # feature_engineering.py
-"""Functions for extracting features from raw video frames."""
+"""Functions for extracting features based on the brightest region's temporal gradient."""
 
 import numpy as np
 import warnings
-from scipy.stats import skew, kurtosis # Import skew and kurtosis
+import cv2  # Import OpenCV
+import config # Import config to potentially get parameters
 
-# --- TensorFlow Import Block (remains the same) ---
-try:
-    import tensorflow as tf
-    from tensorflow.keras.applications import MobileNetV2
-    from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
-    TF_AVAILABLE = True
-except ImportError:
-    TF_AVAILABLE = False
-except Exception as e:
-    print(f"Warning: Error importing TensorFlow components: {e}")
-    TF_AVAILABLE = False
-# --- End TensorFlow Import Block ---
+# --- Helper Functions (from the provided script) ---
 
-# --- load_cnn_base function (remains the same) ---
-def load_cnn_base(input_shape=(224, 224, 3)):
-    # ... (keep existing code) ...
-    if not TF_AVAILABLE:
-        print("Error: Cannot load CNN base model, TensorFlow not available.")
+def compute_mean_frame(frames):
+    """Computes the pixel-wise mean frame across all video frames."""
+    if frames is None or len(frames) == 0:
         return None
     try:
-        base_model = MobileNetV2(weights='imagenet', include_top=False,
-                                 input_shape=input_shape, pooling='avg')
-        base_model.trainable = False
-        print("Loaded MobileNetV2 base model with built-in Global Average Pooling and frozen weights.")
-        return base_model
+        return np.mean(frames, axis=0, dtype=np.float32) # Use float32 for precision
     except Exception as e:
-        print(f"Error loading MobileNetV2 model: {type(e).__name__} - {e}")
-        return None
-# --- End load_cnn_base ---
-
-# --- extract_cnn_features function (remains the same) ---
-def extract_cnn_features(frames, cnn_base_model, target_size=(224, 224)):
-    # ... (keep existing code) ...
-    if not TF_AVAILABLE or cnn_base_model is None:
-        print("Error: TensorFlow or CNN base model not available/loaded for feature extraction.")
-        return None
-    if not isinstance(frames, np.ndarray) or frames.ndim != 3 or frames.shape[0] == 0:
-        print(f"Warning: Invalid frames shape {getattr(frames, 'shape', 'N/A')} for CNN features. Returning None.")
+        print(f"Error computing mean frame: {e}")
         return None
 
-    num_frames, h, w = frames.shape
-    try:
-        # Frame Preprocessing
-        normalized_frames = np.zeros_like(frames, dtype=np.float32)
-        for i, frame in enumerate(frames):
-            min_val, max_val = frame.min(), frame.max()
-            if max_val > min_val:
-                normalized_frames[i] = (frame - min_val) / (max_val - min_val) * 255.0
-            else:
-                normalized_frames[i] = np.zeros(frame.shape, dtype=np.float32)
-        frames_rgb = np.stack([normalized_frames] * 3, axis=-1)
-        frames_resized = tf.image.resize(tf.constant(frames_rgb, dtype=tf.float32), target_size)
-        frames_mobilenet_preprocessed = preprocess_input(frames_resized)
-
-        # Feature Extraction
-        print(f"  Extracting CNN features from {num_frames} frames...")
-        @tf.function
-        def predict_features(data):
-             return cnn_base_model(data, training=False)
-        features_per_frame = predict_features(frames_mobilenet_preprocessed)
-        features_per_frame_np = features_per_frame.numpy()
-
-        # Temporal Aggregation
-        if features_per_frame_np.shape[0] > 0:
-            video_feature_vector = np.mean(features_per_frame_np, axis=0)
-        else:
-            print("Warning: No frame features to aggregate temporally. Returning None.")
-            return None
-        return video_feature_vector.astype(np.float32)
-
-    except Exception as e:
-        print(f"Error during CNN feature extraction: {type(e).__name__} - {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-# --- End extract_cnn_features ---
-
-
-def extract_handcrafted_features(frames):
+def extract_consistent_region(mean_frame, threshold_factor=0.8):
     """
-    Extracts simple statistical features from video frames, including skewness and kurtosis.
-    Assumes frames is a numpy array (num_frames, height, width).
+    Extracts the consistently bright region from the mean frame using thresholding and morphology.
+    Returns the mask of the largest bright connected component.
+    """
+    if mean_frame is None or mean_frame.size == 0:
+        print("Warning: Mean frame is empty or None in extract_consistent_region.")
+        return None, None
+
+    max_intensity = np.max(mean_frame)
+    if max_intensity <= 0: # Handle cases where the frame is all dark or zero
+        print("Warning: Max intensity of mean frame is <= 0. Cannot find bright region.")
+        return None, None
+
+    thresh_value = threshold_factor * max_intensity
+    # Ensure frame is 8-bit for OpenCV binary operations if needed, but comparison works on float
+    # Convert boolean mask to uint8 for morphology and connected components
+    binary_mask_uint8 = (mean_frame >= thresh_value).astype(np.uint8)
+
+    # Define kernel for morphological closing
+    kernel = np.ones((5, 5), np.uint8) # 5x5 kernel, adjust if needed
+    # Close operation: Dilate then Erode - fills small holes, connects nearby objects
+    mask_clean = cv2.morphologyEx(binary_mask_uint8, cv2.MORPH_CLOSE, kernel)
+
+    # Find connected components in the cleaned mask
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_clean, connectivity=8)
+
+    if num_labels <= 1: # Only background found
+        print("Warning: No connected components found above threshold after cleaning.")
+        return None, None
+
+    # Find the label of the largest component (excluding background label 0)
+    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA]) # Add 1 because we slice stats from index 1
+
+    # Create mask for the largest component
+    region_mask = (labels == largest_label)
+
+    # Bbox (optional, not used later but good practice)
+    # x = stats[largest_label, cv2.CC_STAT_LEFT]
+    # y = stats[largest_label, cv2.CC_STAT_TOP]
+    # w = stats[largest_label, cv2.CC_STAT_WIDTH]
+    # h = stats[largest_label, cv2.CC_STAT_HEIGHT]
+    # bbox = (x, y, w, h)
+
+    if not np.any(region_mask): # Check if the largest component mask is somehow empty
+        print("Warning: Largest component mask is empty.")
+        return None, None
+
+    return region_mask # Return only the mask
+
+def compute_temporal_gradient_region(frames, region_mask, interval_sec=5, fps=30):
+    """
+    Computes the mean absolute temporal gradient of the average intensity
+    within the specified region over a time interval.
+    """
+    if frames is None or len(frames) == 0:
+        print("Warning: No frames provided for temporal gradient calculation.")
+        return np.nan
+    if region_mask is None or not np.any(region_mask): # Check if mask is valid and not empty
+        print("Warning: Invalid or empty region mask provided for temporal gradient calculation.")
+        return np.nan
+
+    num_interval_frames = int(interval_sec * fps)
+    num_interval_frames = min(num_interval_frames, frames.shape[0]) # Don't exceed available frames
+
+    if num_interval_frames <= 1: # Need at least 2 frames to calculate difference
+        print(f"Warning: Not enough frames ({num_interval_frames}) in interval to compute temporal gradient.")
+        return 0.0 # Or np.nan? 0.0 implies no change if only one frame.
+
+    intensity_series = []
+    for i in range(num_interval_frames):
+        frame = frames[i]
+        # Calculate mean intensity ONLY within the masked region
+        # Check if mask is valid for frame shape (should be)
+        if region_mask.shape == frame.shape:
+             masked_pixels = frame[region_mask]
+             if masked_pixels.size > 0: # Ensure there are pixels in the mask
+                 avg_intensity = np.mean(masked_pixels)
+                 intensity_series.append(avg_intensity)
+             else:
+                 print(f"Warning: Frame {i} has no pixels within the region mask. Appending NaN.")
+                 intensity_series.append(np.nan) # Append NaN if mask somehow doesn't overlap
+        else:
+             print(f"Warning: Frame {i} shape {frame.shape} differs from mask shape {region_mask.shape}. Skipping frame.")
+             intensity_series.append(np.nan) # Append NaN if shapes mismatch
+
+    intensity_series = np.array(intensity_series)
+
+    # Remove NaNs before calculating difference, if any occurred
+    valid_intensities = intensity_series[~np.isnan(intensity_series)]
+
+    if len(valid_intensities) <= 1: # Need at least 2 valid points for diff
+        print(f"Warning: Not enough valid intensity values ({len(valid_intensities)}) to compute temporal gradient.")
+        return 0.0 # Or np.nan
+
+    # Calculate difference between consecutive valid average intensities
+    gradient = np.diff(valid_intensities)
+    mean_abs_gradient = np.mean(np.abs(gradient)) # Already handles empty gradient array case (returns nan)
+
+    # Return 0.0 if nan to allow imputation later, consistent with no change.
+    return mean_abs_gradient if np.isfinite(mean_abs_gradient) else 0.0
+
+
+# --- Main Feature Extraction Function to be called from main.py ---
+
+def extract_bright_region_features(frames):
+    """
+    Extracts features based on the consistently brightest region.
+    Uses parameters from config.py or defaults.
 
     Args:
-        frames (np.ndarray): Video frames.
+        frames (np.ndarray): Video frames (num_frames, height, width).
 
     Returns:
-        dict: A dictionary of extracted features. Returns dict with NaNs if input is invalid.
+        dict: Dictionary containing 'bright_region_temp_grad'.
+              Value is NaN if calculation fails.
     """
-    # Define ALL feature names FIRST
-    feature_names = [
-        # Basic Stats
-        "mean_temp", "std_temp", "max_temp", "min_temp", "median_temp",
-        "q25_temp", "q75_temp",
-        # Skewness & Kurtosis of Temp Means
-        "skew_temp", "kurt_temp",
-        # Stats of Intra-Frame Variation
-        "mean_frame_std", "std_frame_std",
-        "skew_frame_std", "kurt_frame_std", # Skew/Kurt of frame stds
-        # Temporal Gradient Stats
-        "mean_temp_grad", "std_temp_grad", "max_abs_temp_grad",
-        "skew_temp_grad", "kurt_temp_grad", # Skew/Kurt of temporal gradients
-        # Spatial Gradient Stats
-        "mean_spatial_grad", "std_spatial_grad", "max_spatial_grad",
-        "skew_spatial_grad", "kurt_spatial_grad" # Skew/Kurt of spatial gradients
-    ]
+    feature_name = 'bright_region_temp_grad'
+    features = {feature_name: np.nan} # Initialize with NaN
 
-    # Basic check for valid input
-    if not isinstance(frames, np.ndarray) or frames.ndim != 3 or frames.shape[0] < 1 or frames.shape[1] < 1 or frames.shape[2] < 1:
-        print(f"Warning: Invalid frames shape {getattr(frames, 'shape', 'N/A')} for handcrafted features. Returning NaNs.")
-        # Return dict with NaN for all expected features
-        return {name: np.nan for name in feature_names}
+    # Get parameters (use defaults or from config if defined)
+    threshold_factor = getattr(config, 'BRIGHT_REGION_THRESHOLD', 0.8)
+    fps = getattr(config, 'VIDEO_FPS', 30)
+    interval_sec = getattr(config, 'GRADIENT_INTERVAL_SEC', 5)
 
-    try:
-        features = {}
-        num_frames = frames.shape[0]
-
-        # --- Per-Frame Stat Calculation ---
-        # Calculate per-frame stats first to get distributions over time
-        frame_means = np.array([np.mean(f) for f in frames])
-        frame_stds = np.array([np.std(f) for f in frames])
-        frame_maxs = np.array([np.max(f) for f in frames])
-        frame_mins = np.array([np.min(f) for f in frames])
-        frame_medians = np.array([np.median(f) for f in frames])
-        # Use nanpercentile to be robust to potential NaNs within a frame, though unlikely here
-        frame_q25 = np.array([np.nanpercentile(f, 25) for f in frames])
-        frame_q75 = np.array([np.nanpercentile(f, 75) for f in frames])
-
-        # Temporal gradient stats
-        if num_frames > 1:
-            temporal_diff = np.abs(np.diff(frames, axis=0))
-            temporal_grad_mean_per_diff = np.array([np.mean(diff) for diff in temporal_diff])
-        else:
-            # Assign empty array or placeholder that results in NaN/0 for stats below
-            temporal_grad_mean_per_diff = np.array([])
-
-        # Spatial gradient stats
-        spatial_grad_mags_mean_per_frame = []
-        spatial_grad_mags_max_per_frame = []
-        for frame in frames:
-             if frame.shape[0] > 1 and frame.shape[1] > 1:
-                 gy, gx = np.gradient(frame)
-                 grad_mag = np.sqrt(gx**2 + gy**2)
-                 spatial_grad_mags_mean_per_frame.append(np.mean(grad_mag))
-                 spatial_grad_mags_max_per_frame.append(np.max(grad_mag))
-             else:
-                 spatial_grad_mags_mean_per_frame.append(0.0)
-                 spatial_grad_mags_max_per_frame.append(0.0)
-        spatial_grad_mags_mean_per_frame = np.array(spatial_grad_mags_mean_per_frame)
-        spatial_grad_mags_max_per_frame = np.array(spatial_grad_mags_max_per_frame)
-        # --- End Per-Frame Stat Calculation ---
-
-
-        # --- Aggregate Stats Over Time ---
-
-        # Overall intensity/temperature stats
-        features["mean_temp"] = np.mean(frame_means) if len(frame_means) > 0 else np.nan
-        features["std_temp"] = np.std(frame_means) if len(frame_means) > 1 else 0.0
-        features["max_temp"] = np.max(frame_maxs) if len(frame_maxs) > 0 else np.nan
-        features["min_temp"] = np.min(frame_mins) if len(frame_mins) > 0 else np.nan
-        features["median_temp"] = np.median(frame_medians) if len(frame_medians) > 0 else np.nan
-        # Use mean instead of median for q25/q75 for consistency with mean_temp? Mean is fine.
-        features["q25_temp"] = np.mean(frame_q25) if len(frame_q25) > 0 else np.nan
-        features["q75_temp"] = np.mean(frame_q75) if len(frame_q75) > 0 else np.nan
-        # Skewness & Kurtosis of frame means
-        features["skew_temp"] = skew(frame_means) if len(frame_means) > 1 else 0.0
-        features["kurt_temp"] = kurtosis(frame_means, fisher=True) if len(frame_means) > 1 else 0.0 # Fisher=True -> normal=0
-
-        # Stats of the standard deviation within frames
-        features["mean_frame_std"] = np.mean(frame_stds) if len(frame_stds) > 0 else np.nan
-        features["std_frame_std"] = np.std(frame_stds) if len(frame_stds) > 1 else 0.0
-        # Skewness & Kurtosis of frame stds
-        features["skew_frame_std"] = skew(frame_stds) if len(frame_stds) > 1 else 0.0
-        features["kurt_frame_std"] = kurtosis(frame_stds, fisher=True) if len(frame_stds) > 1 else 0.0
-
-        # Temporal gradient (frame difference) stats
-        if num_frames > 1 and len(temporal_grad_mean_per_diff) > 0:
-            features["mean_temp_grad"] = np.mean(temporal_grad_mean_per_diff)
-            features["std_temp_grad"] = np.std(temporal_grad_mean_per_diff) if len(temporal_grad_mean_per_diff) > 1 else 0.0
-            features["max_abs_temp_grad"] = np.max(temporal_grad_mean_per_diff)
-            # Skewness & Kurtosis of temporal gradients
-            features["skew_temp_grad"] = skew(temporal_grad_mean_per_diff) if len(temporal_grad_mean_per_diff) > 1 else 0.0
-            features["kurt_temp_grad"] = kurtosis(temporal_grad_mean_per_diff, fisher=True) if len(temporal_grad_mean_per_diff) > 1 else 0.0
-        else:
-            # Assign 0 or NaN for consistency if no temporal diff possible/calculated
-            features["mean_temp_grad"] = 0.0
-            features["std_temp_grad"] = 0.0
-            features["max_abs_temp_grad"] = 0.0
-            features["skew_temp_grad"] = 0.0 # Added default
-            features["kurt_temp_grad"] = 0.0 # Added default
-
-        # Aggregate spatial gradient stats over frames
-        features["mean_spatial_grad"] = np.mean(spatial_grad_mags_mean_per_frame) if len(spatial_grad_mags_mean_per_frame) > 0 else np.nan
-        features["std_spatial_grad"] = np.std(spatial_grad_mags_mean_per_frame) if len(spatial_grad_mags_mean_per_frame) > 1 else 0.0
-        features["max_spatial_grad"] = np.max(spatial_grad_mags_max_per_frame) if len(spatial_grad_mags_max_per_frame) > 0 else np.nan
-        # Skewness & Kurtosis of spatial gradients (mean magnitude per frame)
-        features["skew_spatial_grad"] = skew(spatial_grad_mags_mean_per_frame) if len(spatial_grad_mags_mean_per_frame) > 1 else 0.0
-        features["kurt_spatial_grad"] = kurtosis(spatial_grad_mags_mean_per_frame, fisher=True) if len(spatial_grad_mags_mean_per_frame) > 1 else 0.0
-        # --- End Aggregate Stats Over Time ---
-
-
-        # --- Final Checks ---
-        # Check for any NaN/Inf values produced by calculations
-        for k, v in features.items():
-            if not np.isfinite(v):
-                 # Use a more specific warning message
-                 print(f"    Warning: Non-finite value ({v}) generated for feature '{k}'. Will be handled by imputer.")
-                 # Ensure NaNs remain NaN, don't replace with 0 here. Let imputer do its job.
-                 features[k] = np.nan # Explicitly set to NaN if non-finite
-
-        # Ensure all expected features are present, even if NaN (safeguard)
-        for name in feature_names:
-            if name not in features:
-                print(f"    Error: Feature '{name}' was not calculated. Setting to NaN.")
-                features[name] = np.nan
-        # --- End Final Checks ---
-
+    if frames is None or len(frames) == 0:
+        print("Warning: Empty frames array passed to extract_bright_region_features.")
         return features
 
+    try:
+        mean_frame = compute_mean_frame(frames)
+        if mean_frame is None: return features # Return NaN if mean frame failed
+
+        region_mask = extract_consistent_region(mean_frame, threshold_factor=threshold_factor)
+        if region_mask is None: return features # Return NaN if region extraction failed
+
+        temporal_gradient = compute_temporal_gradient_region(frames, region_mask,
+                                                              interval_sec=interval_sec, fps=fps)
+
+        features[feature_name] = temporal_gradient # Store the calculated gradient
+
     except Exception as e:
-         # Add more detail to error message
-         print(f"Error during handcrafted feature extraction (calculating stats): {type(e).__name__} - {e}. Returning NaNs for all features.")
-         import traceback
-         traceback.print_exc() # Print traceback for debugging
-         # Return dict with NaN for all expected features
-         return {name: np.nan for name in feature_names}
+        print(f"Error during bright region feature extraction: {type(e).__name__} - {e}")
+        import traceback
+        traceback.print_exc()
+        # features[feature_name] remains NaN
+
+    # Final check just in case
+    if not np.isfinite(features[feature_name]):
+        print(f"    Final value for {feature_name} is non-finite. Ensuring NaN.")
+        features[feature_name] = np.nan
+
+    return features

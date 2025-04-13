@@ -1,316 +1,267 @@
 # main.py
-"""Main script to run the airflow prediction experiment."""
+"""Main script to run the airflow prediction regression experiment."""
 
 import os
 import pandas as pd
 import joblib
 import numpy as np
 import time
+import warnings
 
 # Import project modules
 import config
 import data_utils
-import feature_engineering
-import modeling
-import plotting
-import tuning # Tuning disabled for initial simplified run
+import feature_engineering # Updated feature engineering
+import modeling          # Updated modeling (regressors)
+import plotting          # Updated plotting
+import tuning            # Updated tuning
 
-from modeling import get_classifiers #, build_ensemble_pipeline # Ensemble disabled for initial run
+from modeling import get_regressors # Get regressors now
 # Import sklearn components
-from sklearn.model_selection import LeaveOneOut, StratifiedKFold # cross_val_score # Not needed for individual evaluation loop style
-from sklearn.preprocessing import LabelEncoder
-from sklearn.pipeline import Pipeline
-from sklearn.metrics import (accuracy_score, f1_score, classification_report,
-                             confusion_matrix)
+from sklearn.model_selection import LeaveOneOut, KFold, cross_val_predict # Use KFold, add cross_val_predict
+# Import regression metrics
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.exceptions import FitFailedWarning
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
-import warnings
 
-# Filter warnings related to fitting failures in CV (can happen with tiny folds)
+# Suppress specific warnings
 warnings.filterwarnings("ignore", category=FitFailedWarning)
-warnings.filterwarnings("ignore", category=UserWarning, message=".*Could not figure out the number of classes*")
+warnings.filterwarnings("ignore", category=UserWarning, message=".*SettingWithCopyWarning*")
+warnings.filterwarnings("ignore", category=FutureWarning) # Ignore potential future warnings from libraries
 
 
 def run_experiment():
-    """Loads data, extracts features, evaluates individual models,
-    and identifies the best performing one based on CV.""" # Simplified goal
+    """Loads data, extracts temporal features, tunes hyperparameters for regressors,
+       evaluates models using regression metrics, and saves the best regressor."""
 
-    print("--- Starting Airflow Prediction Experiment (with CV) ---")
-    print("--- NOTE: CNN Features, PCA, RFECV, and Ensemble are DISABLED for this run ---")
+    print("--- Starting Airflow Prediction Experiment (Regression) ---")
+    print("--- Features: delta_T, mean_abs_temp_grad ---")
+    print("--- NOTE: PCA, CNN, Ensembles are DISABLED ---")
 
-    # Check TensorFlow availability early (though not used in this config)
-    # Optional: Keep check for informational purposes if user might re-enable later
-    if not feature_engineering.TF_AVAILABLE:
-        print("Info: TensorFlow not found/imported. CNN feature extraction would fail if enabled.")
-        # return # Don't exit if only doing handcrafted
 
-    # 1. Load Raw Data
+    # 1. Load Raw Data (remains the same)
     all_raw_data = data_utils.load_raw_data(config.DATASET_FOLDER)
-    if not all_raw_data:
-        print("Error: No data loaded. Exiting.")
-        return
+    # ... (error check) ...
 
-    # 2. Load CNN Base Model (Optional - not used in feature extraction below)
-    # print("\n--- Loading CNN Base Model (INFO ONLY - Not used for features in this run) ---")
-    # cnn_input_shape = config.CNN_INPUT_SIZE + (3,)  # Add 3 channels
-    # cnn_base_model = feature_engineering.load_cnn_base(input_shape=cnn_input_shape)
-    # if cnn_base_model is None and feature_engineering.TF_AVAILABLE: # Check only if TF should be working
-    #     print("Error: Failed to load CNN base model even though TF seems available.")
-        # return # Don't exit if only doing handcrafted
-    cnn_base_model = None # Ensure it's None if not loaded/used
-
-    # 3. Extract Features (Handcrafted Only for this run)
+    # 2. Extract Specific Features (Bright Region Gradient)
     feature_list = []
-    print("\n--- Extracting Handcrafted Features Only ---")
+    print("\n--- Extracting Bright Region Temporal Features ---") # Updated message
     start_time = time.time()
     for i, sample in enumerate(all_raw_data):
-        print(f"Extracting features for sample {i+1}/{len(all_raw_data)}: {os.path.basename(sample['filepath'])}")
+        # Call the new feature extraction function
+        bright_region_features = feature_engineering.extract_bright_region_features(sample["frames"])
 
-        # --- CNN Feature Extraction DISABLED ---
-        # cnn_features_vector = feature_engineering.extract_cnn_features(
-        #     sample["frames"],
-        #     cnn_base_model,
-        #     target_size=config.CNN_INPUT_SIZE
-        # )
-        cnn_features_vector = None # Explicitly None
+        # Check if the feature was calculated successfully (not NaN)
+        extracted_grad = bright_region_features.get('bright_region_temp_grad', np.nan)
 
-        handcrafted_feats = feature_engineering.extract_handcrafted_features(sample["frames"])
-
-        # Combine handcrafted features with delta_T and label.
-        # if cnn_features_vector is not None and handcrafted_feats is not None: # Original condition
-        if handcrafted_feats is not None: # Use only handcrafted check
+        if not np.isnan(extracted_grad):
             combined_features = {
-                # **{f"cnn_{j}": val for j, val in enumerate(cnn_features_vector)}, # CNN Features DISABLED
-                **handcrafted_feats,
+                # Use the specific feature name used in the dictionary
+                'bright_region_temp_grad': extracted_grad,
                 "delta_T": sample["delta_T"],
-                "airflow_rate": sample["airflow_rate"]
+                "airflow_rate": sample["airflow_rate"] # Keep the target variable
             }
             feature_list.append(combined_features)
         else:
-            print(f"  Skipping sample {i+1} due to handcrafted feature extraction error.") # Adjusted message
+            print(f"  Skipping sample {i+1} due to bright region feature extraction error or NaN result.")
 
     end_time = time.time()
     print(f"Feature extraction took: {end_time - start_time:.2f} seconds.")
 
     if not feature_list:
-        print("Error: No features could be extracted. Exiting.")
+        print("Error: No features could be extracted or all were NaN. Exiting.")
         return
 
-    # 4. Create DataFrame and Prepare X, y
+    # 3. Create DataFrame and Prepare X, y for Regression
     df = pd.DataFrame(feature_list)
-    print("\n--- Feature DataFrame Head (Handcrafted + DeltaT) ---")
+    print("\n--- Feature DataFrame Head (Bright Region Grad + DeltaT) ---") # Updated message
     print(df.head())
     print(f"\nDataFrame shape: {df.shape}")
 
-    # Drop columns with all NaN values
-    cols_all_nan = df.columns[df.isnull().all()]
-    if not cols_all_nan.empty:
-        print(f"\nWarning: Dropping columns with all NaN values: {list(cols_all_nan)}")
-        df = df.drop(columns=cols_all_nan)
+    # Drop rows with any remaining NaNs
+    df_original_len = len(df)
+    df.dropna(inplace=True)
+    if len(df) < df_original_len:
+        print(f"\nWarning: Dropped {df_original_len - len(df)} rows containing NaN values.")
 
-    if "airflow_rate" not in df.columns:
-         print("Error: 'airflow_rate' column not found in DataFrame.")
+    # Check required columns exist
+    required_cols = ["airflow_rate", "delta_T", "bright_region_temp_grad"]
+    if not all(col in df.columns for col in required_cols):
+         print(f"Error: Required columns ({required_cols}) not found in DataFrame.")
          return
+    if df.empty:
+        print("Error: DataFrame is empty after processing NaNs. Exiting.")
+        return
 
-    if df.isnull().any().any():
-        print("\nWarning: NaN values detected in DataFrame before imputation (will be handled by pipeline).")
+    # Target variable y is the continuous airflow rate
+    y = df["airflow_rate"].astype(float)
+    # Features X include delta_T and the new bright region gradient feature
+    X = df[["delta_T", "bright_region_temp_grad"]] # Select ONLY these two columns
 
-    le = LabelEncoder()
-    df["airflow_rate_encoded"] = le.fit_transform(df["airflow_rate"].astype(str))
-    # Save label mapping for later use if needed (e.g., prediction interpretation)
-    label_mapping = dict(zip(le.transform(le.classes_), le.classes_))
-    print("\nLabel Encoding Mapping:", label_mapping)
+    print(f"\nFeature matrix X shape: {X.shape}")
+    print(f"Target vector y shape: {y.shape}")
+    print("X Head:\n", X.head())
+    print("\ny Description:\n", y.describe())
 
-    # Remove label columns from features to avoid leakage
-    X = df.drop(columns=["airflow_rate", "airflow_rate_encoded"])
-    y = df["airflow_rate_encoded"]
 
-    #5. Hyperparameter Tuning (Run for all models and store results)
-    print("\n--- Running Hyperparameter Tuning for All Models ---")
-    all_classifiers_for_tuning = get_classifiers()
-    best_params_all_models = {}
-    best_scores_all_models = {}
+    # 4. Hyperparameter Tuning (for Regressors)
+    print("\n--- Running Hyperparameter Tuning for All Regressors ---")
+    # This function now uses regression grids and scoring
+    all_best_params, all_best_scores = tuning.run_grid_search_all_models(X, y)
 
-    for name in all_classifiers_for_tuning.keys():
-        print(f"\n--- Running Grid Search for {name} ---")
-        # Pass the specific classifier name to the tuning function
-        best_params, best_score = tuning.run_grid_search(X, y, classifier_name=name)
-        # Store results, removing the 'model__' prefix from keys for direct use
-        best_params_cleaned = {k.replace('model__', ''): v for k, v in best_params.items()}
-        best_params_all_models[name] = best_params_cleaned
-        best_scores_all_models[name] = best_score
+    print("\n--- Tuning Results Summary (Score: neg_mean_squared_error) ---")
+    for name in all_best_params:
+         score = all_best_scores[name]
+         mse = -score if score != -np.inf else np.inf
+         rmse = np.sqrt(mse) if mse != np.inf else np.inf
+         print(f"{name}: Best Score={score:.4f} (MSE={mse:.4f}, RMSE={rmse:.4f}), Best Params={all_best_params[name]}")
 
-    print("\n--- Tuning Results Summary ---")
-    for name in best_params_all_models:
-         print(f"{name}: Best Score = {best_scores_all_models[name]:.4f}, Best Params = {best_params_all_models[name]}")
 
-    # --- CV Strategy Setup (Same as before) ---
+    # 5. Setup Cross-Validation Strategy for Evaluation
     if config.CV_METHOD == 'LeaveOneOut':
         cv_strategy = LeaveOneOut()
-        n_splits = len(X) # Should be 22
-    elif config.CV_METHOD == 'StratifiedKFold':
-        min_class_count = y.value_counts().min()
-        n_splits = max(2, min(config.K_FOLDS, min_class_count))
+        n_splits = len(X)
+        cv_name = "LeaveOneOut"
+    elif config.CV_METHOD == 'KFold':
+        n_splits = min(config.K_FOLDS, len(X)) # Ensure K is not larger than N
         if n_splits < 2:
-             print(f"Error: Cannot perform StratifiedKFold with smallest class count ({min_class_count}) < 2. Exiting.")
-             return
+             print(f"Warning: K_FOLDS ({config.K_FOLDS}) too large or dataset too small ({len(X)}). Falling back to LeaveOneOut.")
+             cv_strategy = LeaveOneOut()
+             n_splits = len(X)
+             cv_name = "LeaveOneOut"
         else:
-             if n_splits != config.K_FOLDS:
-                 print(f"Warning: Reducing K from {config.K_FOLDS} to {n_splits} due to small class size ({min_class_count}).")
-             cv_strategy = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=config.RANDOM_STATE)
+             cv_strategy = KFold(n_splits=n_splits, shuffle=True, random_state=config.RANDOM_STATE)
+             cv_name = f"{n_splits}-Fold KFold"
     else:
         print(f"Warning: Invalid CV_METHOD '{config.CV_METHOD}'. Defaulting to LeaveOneOut.")
         cv_strategy = LeaveOneOut()
         n_splits = len(X)
-    # --- End CV Setup ---
+        cv_name = "LeaveOneOut"
 
-    # 6. Evaluate individual models USING TUNED parameters
-    print(f"\n--- Evaluating Models using Best Parameters found during Tuning ---")
-    print(f"--- Using {config.CV_METHOD} Cross-Validation ({n_splits} splits) ---")
 
-    results = {}
-    all_classifiers_to_eval = get_classifiers() # Get fresh instances
+    # 6. Evaluate individual regressors USING TUNED parameters with Cross-Validation
+    print(f"\n--- Evaluating Regressors using Best Parameters found during Tuning ---")
+    print(f"--- Using {cv_name} Cross-Validation ({n_splits} splits) ---")
 
-    for name, model_instance in all_classifiers_to_eval.items():
+    evaluation_results = {}
+    all_regressors_to_eval = get_regressors() # Get fresh instances
+
+    for name, model_instance in all_regressors_to_eval.items():
         print(f"\nEvaluating model: {name} with tuned parameters...")
 
-        # Get the best parameters found for this model
-        tuned_params = best_params_all_models.get(name, {}) # Get params or empty dict if none found
+        # Get the best parameters found for this model (cleaning 'model__' prefix)
+        tuned_params_raw = all_best_params.get(name, {})
+        tuned_params = {k.replace('model__', ''): v for k,v in tuned_params_raw.items()}
 
         if tuned_params:
              print(f"  Applying Tuned Parameters: {tuned_params}")
              try:
-                 # Apply the parameters to the model instance
                  model_instance.set_params(**tuned_params)
              except ValueError as e:
                   print(f"  Warning: Could not set parameters {tuned_params} for {name}. Using defaults. Error: {e}")
         else:
              print("  No tuned parameters found or applied. Using default parameters.")
 
-
-        # Build pipeline WITHOUT PCA, using the (potentially updated) model_instance
+        # Build pipeline WITHOUT PCA (config.PCA_N_COMPONENTS is None)
         pipeline_model = modeling.build_pipeline(model_instance, pca_components=None)
 
-        
-        # if name == "SVC":
-        #     from sklearn.feature_selection import SelectKBest, f_classif
-        #     print("  Adding SelectKBest(k=12) for SVC pipeline") # Experiment with k
-        #     pipeline_model = Pipeline([
-        #         ('imputer', SimpleImputer(strategy='mean')),
-        #         ('selector', SelectKBest(score_func=f_classif, k=12)), # Adjust k
-        #         ('scaler', StandardScaler()),
-        #         ('model', model_instance) # model_instance already has tuned params
-        #     ])
-        # else:
-        #     # Build standard pipeline for other models
-        #     pipeline_model = modeling.build_pipeline(model_instance, pca_components=None)
-
-        # --- CV Evaluation Loop (Same as before) ---
-        all_preds = np.array([-1] * len(y)) # Initialize with placeholder
-        all_actuals = np.array(y.copy())
-        fold_count = 0
+        # Get cross-validated predictions
         try:
             start_cv_time = time.time()
-            for train_idx, test_idx in cv_strategy.split(X, y):
-                fold_count += 1
-                if len(test_idx) == 0: continue
-                if len(train_idx) == 0: continue
-
-                X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
-                y_train = y.iloc[train_idx] # y_test not needed here, use all_actuals
-
-                if len(np.unique(y_train)) < len(label_mapping):
-                     # Suppress this warning for LOO as it's expected
-                     if not isinstance(cv_strategy, LeaveOneOut):
-                          print(f"  Warning: Fold {fold_count} - Training data missing classes.")
-
-                pipeline_model.fit(X_train, y_train)
-                y_pred = pipeline_model.predict(X_test)
-                all_preds[test_idx] = y_pred
-
+            # Use cross_val_predict to get predictions for each sample when it was in the test set
+            y_pred_cv = cross_val_predict(pipeline_model, X, y, cv=cv_strategy, n_jobs=-1)
             end_cv_time = time.time()
-            print(f"  CV for {name} took {end_cv_time - start_cv_time:.2f} seconds.")
+            print(f"  CV predictions for {name} took {end_cv_time - start_cv_time:.2f} seconds.")
 
-            valid_indices = np.where(all_preds != -1)[0]
-            if len(valid_indices) < len(y):
-                 print(f"  Warning: Only {len(valid_indices)}/{len(y)} samples predicted.")
-            if len(valid_indices) == 0:
-                print(f"  Error: No valid predictions collected for model {name}.")
-                results[name] = None
-                continue
+            # Calculate regression metrics using the CV predictions
+            mse = mean_squared_error(y, y_pred_cv)
+            rmse = np.sqrt(mse)
+            mae = mean_absolute_error(y, y_pred_cv)
+            r2 = r2_score(y, y_pred_cv)
+            # Calculate neg_mse for comparison with tuning score
+            neg_mse_eval = -mse
 
-            eval_preds = all_preds[valid_indices]
-            eval_actuals = all_actuals[valid_indices]
+            # Store results
+            results_dict = {
+                'neg_mean_squared_error': neg_mse_eval, # Store the metric used for comparison
+                'mse': mse,
+                'rmse': rmse,
+                'mae': mae,
+                'r2': r2,
+                'y_pred_cv': y_pred_cv # Store predictions for plotting the best model
+            }
+            evaluation_results[name] = results_dict
 
-            accuracy = accuracy_score(eval_actuals, eval_preds)
-            f1_w = f1_score(eval_actuals, eval_preds, average='weighted', zero_division=0)
-            report = classification_report(eval_actuals, eval_preds, zero_division=0,
-                                            labels=np.arange(len(label_mapping)),
-                                            target_names=[str(label_mapping[i]) for i in np.arange(len(label_mapping))])
-            cm = confusion_matrix(eval_actuals, eval_preds, labels=np.arange(len(label_mapping)))
-
-            results[name] = {"accuracy": accuracy, "f1_weighted": f1_w, "report": report, "cm": cm}
-
-            print(f"--- Results for {name} (Aggregated over CV folds with Tuned Params) ---")
-            print(f"Accuracy: {accuracy:.4f}")
-            print(f"F1 Score (Weighted): {f1_w:.4f}")
-            print("Classification Report:\n", report)
-            print("Confusion Matrix:\n", cm)
+            print(f"--- Results for {name} (Aggregated over {cv_name} folds with Tuned Params) ---")
+            print(f"MSE:  {mse:.4f}")
+            print(f"RMSE: {rmse:.4f}")
+            print(f"MAE:  {mae:.4f}")
+            print(f"R²:   {r2:.4f}")
 
         except Exception as e:
             print(f"Error during CV evaluation for {name}: {type(e).__name__} - {e}")
             import traceback
             traceback.print_exc()
-            results[name] = None
-        # --- End CV Evaluation Loop ---
+            evaluation_results[name] = None # Mark as failed
 
-
-    # 7. Analyze Results and Plot Best Individual Model (Now using tuned results)
-    valid_results = {name: res for name, res in results.items() if res is not None}
+    # 7. Analyze Results and Plot Best Individual Regressor
+    valid_results = {name: res for name, res in evaluation_results.items() if res is not None}
     if not valid_results:
         print("\nError: No models completed evaluation successfully.")
         return
 
-    metric = config.BEST_MODEL_METRIC
-    try:
-        # Find best model based on the evaluation using TUNED parameters
-        best_model_name = max(valid_results, key=lambda name: valid_results[name][metric])
-        print(f"\n--- Best Individual Model based on CV {metric} (using tuned parameters): {best_model_name} ---")
-        print(f"  {metric}: {valid_results[best_model_name][metric]:.4f}")
+    # Find best model based on the score used in tuning/config
+    metric_to_optimize = config.BEST_MODEL_METRIC_SCORE # e.g., 'neg_mean_squared_error' or 'r2'
+    higher_is_better = config.METRIC_COMPARISON_HIGHER_IS_BETTER
 
-        best_cm = valid_results[best_model_name]['cm']
-        plot_labels = [str(label_mapping[i]) for i in np.arange(len(label_mapping))]
-        # Update plot save path to reflect tuning
-        plot_save_path = config.PLOT_SAVE_PATH.replace(".png", "_tuned.png")
-        plotting.plot_confusion_matrix(cm=best_cm,
-                                       labels=plot_labels,
-                                       title=f'Confusion Matrix - {best_model_name} (Tuned, CV Aggregated)',
-                                       save_path=plot_save_path) # Pass save path if function supports it
+    try:
+        if higher_is_better:
+            best_model_name = max(valid_results, key=lambda name: valid_results[name][metric_to_optimize])
+        else:
+            # If using a metric where lower is better (e.g., 'mse' directly)
+            best_model_name = min(valid_results, key=lambda name: valid_results[name][metric_to_optimize])
+
+        print(f"\n--- Best Individual Regressor based on CV {metric_to_optimize}: {best_model_name} ---")
+        best_result_metrics = valid_results[best_model_name]
+        print(f"  Optimization Score ({metric_to_optimize}): {best_result_metrics[metric_to_optimize]:.4f}")
+        print(f"  MSE:  {best_result_metrics['mse']:.4f}")
+        print(f"  RMSE: {best_result_metrics['rmse']:.4f}")
+        print(f"  MAE:  {best_result_metrics['mae']:.4f}")
+        print(f"  R²:   {best_result_metrics['r2']:.4f}")
+
+
+        # Plot actual vs predicted for the best model using CV predictions
+        plotting.plot_actual_vs_predicted(y_true=y, # Original y
+                                         y_pred=best_result_metrics['y_pred_cv'], # CV predictions
+                                         title=f'Actual vs. Predicted - {best_model_name} (Tuned, CV)',
+                                         save_path=config.PLOT_SAVE_PATH)
 
     except Exception as e:
-        print(f"Error determining or plotting best model: {e}")
+        print(f"Error determining or plotting best model: {type(e).__name__} - {e}")
 
-    # --- Final Model Training and Saving (Optional - consider saving the best tuned model) ---
-    print(f"\n--- Skipping final model training and saving for now ---")
-    # If you want to save the best *tuned* model:
-    # print(f"\n--- Training final {best_model_name} model (tuned) on all data ---")
-    # try:
-    #     final_model_instance = get_classifiers()[best_model_name]
-    #     tuned_params = best_params_all_models.get(best_model_name, {})
-    #     if tuned_params:
-    #         print(f"  Applying Tuned Parameters: {tuned_params}")
-    #         final_model_instance.set_params(**tuned_params)
-    #
-    #     final_pipeline = modeling.build_pipeline(final_model_instance, pca_components=None)
-    #     final_pipeline.fit(X, y)
-    #     print("Final model training complete.")
-    #     save_path = f"final_{best_model_name}_tuned_pipeline.joblib"
-    #     joblib.dump(final_pipeline, save_path)
-    #     print(f"Final {best_model_name} (tuned) pipeline saved to: {save_path}")
-    # except Exception as e:
-    #     print(f"Error during final model training/saving: {type(e).__name__} - {e}")
+
+    # 8. Final Model Training and Saving (Optional)
+    print(f"\n--- Training final {best_model_name} regressor (tuned) on all data ---")
+    try:
+        # Get a fresh instance and apply best params
+        final_model_instance = get_regressors()[best_model_name]
+        best_params_raw = all_best_params.get(best_model_name, {})
+        best_params_final = {k.replace('model__', ''): v for k,v in best_params_raw.items()}
+
+        if best_params_final:
+            print(f"  Applying Tuned Parameters: {best_params_final}")
+            final_model_instance.set_params(**best_params_final)
+
+        # Build final pipeline
+        final_pipeline = modeling.build_pipeline(final_model_instance, pca_components=None)
+        final_pipeline.fit(X, y)
+        print("Final model training complete.")
+
+        # Save the final pipeline
+        joblib.dump(final_pipeline, config.MODEL_SAVE_PATH)
+        print(f"Final {best_model_name} (tuned) pipeline saved to: {config.MODEL_SAVE_PATH}")
+
+    except Exception as e:
+        print(f"Error during final model training/saving: {type(e).__name__} - {e}")
 
 
     print("\n--- Experiment Finished ---")
