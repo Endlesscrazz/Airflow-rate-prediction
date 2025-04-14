@@ -42,65 +42,91 @@ def run_experiment():
     all_raw_data = data_utils.load_raw_data(config.DATASET_FOLDER)
     # ... (error check) ...
 
-    # 2. Extract Specific Features (Bright Region Gradient)
+     # 2. Extract Specific Features (Multi-Interval Bright Region Gradient)
     feature_list = []
-    print("\n--- Extracting Bright Region Temporal Features ---") # Updated message
+    # Dynamically determine expected feature names based on config
+    expected_grad_features = [
+        f"bright_region_grad_{int(i*config.GRADIENT_INTERVAL_SEC)}_{int((i+1)*config.GRADIENT_INTERVAL_SEC)}"
+        for i in range(config.MAX_GRADIENT_INTERVALS)
+    ]
+    print(f"Expecting gradient features: {expected_grad_features}")
+
+    print("\n--- Extracting Multi-Interval Bright Region Temporal Features ---")
     start_time = time.time()
+    processed_samples = 0
+    skipped_samples = 0
+
     for i, sample in enumerate(all_raw_data):
-        # Call the new feature extraction function
-        bright_region_features = feature_engineering.extract_bright_region_features(sample["frames"])
+        print(f"Processing sample {i+1}/{len(all_raw_data)}: {os.path.basename(sample['filepath'])}")
+        # Call the feature extraction function
+        interval_features = feature_engineering.extract_bright_region_features(sample["frames"])
 
-        # Check if the feature was calculated successfully (not NaN)
-        extracted_grad = bright_region_features.get('bright_region_temp_grad', np.nan)
+        # Store features for this sample, initializing expected ones to NaN
+        combined_features = {name: np.nan for name in expected_grad_features}
+        combined_features["delta_T"] = sample["delta_T"]
+        combined_features["airflow_rate"] = sample["airflow_rate"] # Target
 
-        if not np.isnan(extracted_grad):
-            combined_features = {
-                # Use the specific feature name used in the dictionary
-                'bright_region_temp_grad': extracted_grad,
-                "delta_T": sample["delta_T"],
-                "airflow_rate": sample["airflow_rate"] # Keep the target variable
-            }
-            feature_list.append(combined_features)
+        # Update with actually calculated values (if any)
+        if interval_features: # Check if the dict is not empty
+             combined_features.update(interval_features)
+             feature_list.append(combined_features)
+             processed_samples += 1
         else:
-            print(f"  Skipping sample {i+1} due to bright region feature extraction error or NaN result.")
+             print(f"  Skipping sample {i+1} due to major feature extraction error (empty dict returned).")
+             skipped_samples += 1
+             # Optionally append NaNs anyway if you want to impute later,
+             # but skipping is safer if the cause is unknown.
+             # feature_list.append(combined_features)
+
 
     end_time = time.time()
+    print(f"\nFeature extraction finished. Processed: {processed_samples}, Skipped: {skipped_samples}.")
     print(f"Feature extraction took: {end_time - start_time:.2f} seconds.")
 
     if not feature_list:
-        print("Error: No features could be extracted or all were NaN. Exiting.")
+        print("Error: No features could be extracted. Exiting.")
         return
 
     # 3. Create DataFrame and Prepare X, y for Regression
     df = pd.DataFrame(feature_list)
-    print("\n--- Feature DataFrame Head (Bright Region Grad + DeltaT) ---") # Updated message
+    print("\n--- Feature DataFrame Head (Multi-Interval Grads + DeltaT) ---")
     print(df.head())
-    print(f"\nDataFrame shape: {df.shape}")
+    print(f"\nDataFrame shape before NaN drop: {df.shape}")
 
-    # Drop rows with any remaining NaNs
-    df_original_len = len(df)
-    df.dropna(inplace=True)
-    if len(df) < df_original_len:
-        print(f"\nWarning: Dropped {df_original_len - len(df)} rows containing NaN values.")
+    # Define feature columns (delta_T + expected gradient features)
+    feature_columns = ["delta_T"] + expected_grad_features
 
-    # Check required columns exist
-    required_cols = ["airflow_rate", "delta_T", "bright_region_temp_grad"]
-    if not all(col in df.columns for col in required_cols):
-         print(f"Error: Required columns ({required_cols}) not found in DataFrame.")
-         return
-    if df.empty:
-        print("Error: DataFrame is empty after processing NaNs. Exiting.")
-        return
+    # Check if all expected columns are present (might not be if extraction failed early)
+    missing_cols = [col for col in feature_columns if col not in df.columns]
+    if missing_cols:
+        print(f"Warning: Columns missing after feature extraction: {missing_cols}. They will be treated as NaN.")
+        # Add missing columns filled with NaN before imputation/dropping
+        for col in missing_cols:
+             df[col] = np.nan
 
-    # Target variable y is the continuous airflow rate
+
+    # Target variable y
     y = df["airflow_rate"].astype(float)
-    # Features X include delta_T and the new bright region gradient feature
-    X = df[["delta_T", "bright_region_temp_grad"]] # Select ONLY these two columns
+    # Features X (select defined feature columns)
+    X = df[feature_columns]
+
+    # Report NaNs *before* imputation/dropping (imputer will handle them)
+    if X.isnull().any().any():
+        print("\nWarning: NaN values detected in feature matrix X before imputation:")
+        print(X.isnull().sum())
+    else:
+        print("\nNo NaNs detected in feature matrix X before imputation.")
+
 
     print(f"\nFeature matrix X shape: {X.shape}")
     print(f"Target vector y shape: {y.shape}")
     print("X Head:\n", X.head())
     print("\ny Description:\n", y.describe())
+
+    # Check if X or y became empty after potential previous drops (unlikely now)
+    if X.empty or y.empty:
+         print("Error: Feature matrix X or target vector y is empty. Exiting.")
+         return
 
 
     # 4. Hyperparameter Tuning (for Regressors)
