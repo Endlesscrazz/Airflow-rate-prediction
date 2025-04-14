@@ -31,9 +31,11 @@ PCA_N_COMPONENTS = None
 N_ESTIMATORS = 100
 
 # --- Feature Engineering Parameters ---
-BRIGHT_REGION_THRESHOLD = 0.8  # Factor of max intensity for brightest region
-VIDEO_FPS = 30                 # Assumed frames per second of videos
-GRADIENT_INTERVAL_SEC = 5      # Duration (seconds) at start of video for gradient calculation
+BRIGHT_REGION_THRESHOLD = 0.8  # Factor of max intensity
+VIDEO_FPS = 30                 # Assumed frames per second
+GRADIENT_INTERVAL_SEC = 5      # Duration of each gradient window (seconds)
+MAX_GRADIENT_INTERVALS = 3     # Calculate features for first N intervals (e.g., 3 -> 0-5s, 5-10s, 10-15s)
+
 
 # --- Cross-Validation ---
 CV_METHOD = 'LeaveOneOut' # Options: 'LeaveOneOut', 'KFold'
