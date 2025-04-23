@@ -1,288 +1,274 @@
-# feature_engineering.py
-"""Functions for extracting features based on the brightest region.
+# --- START OF FILE feature_engineering.py ---
 
-Features Extracted:
-1.  Temporal Gradients: Mean absolute change in average bright region intensity 
-    between consecutive frames, calculated over successive FRAME-BASED intervals.
-2.  Bright Region Area: Total area (pixel count) of the consistently bright 
-    region identified from the mean frame across the entire video.
+# feature_engineering.py
+"""Functions for extracting features based on the DYNAMIC hotspot region
+identified from interval-based temporal gradient maps.
 """
 
 import numpy as np
 import cv2
-import config # Needed for BRIGHT_REGION_THRESHOLD, FRAME_INTERVAL_SIZE
+import os
+import config
+# Import the updated visualization function
+from visualization_util import save_dynamic_hotspot_visualizations
 
+# --- Mean Frame Calculation (Still needed for visualization comparison) ---
 def compute_mean_frame(frames):
-    """Computes the pixel-wise mean frame across all video frames.
-    Assumes frames are stacked along the 3rd axis (axis=2).
+    if frames is None or frames.ndim != 3 or frames.shape[2] == 0: return None
+    try: return np.mean(frames, axis=2, dtype=np.float64)
+    except Exception: return None
+
+# --- NEW: Calculate Gradient Map for ONE Interval ---
+def compute_interval_gradient_map(frames, start_frame, end_frame):
     """
-    if frames is None:
-        print("Warning: frames is None in compute_mean_frame.")
-        return None
-    if not isinstance(frames, np.ndarray) or frames.size == 0:
-        print("Warning: Invalid or empty frames array provided to compute_mean_frame.")
-        return None
-    if frames.ndim != 3:
-        print(f"Warning: compute_mean_frame expects 3D array (H, W, N), got {frames.ndim}D. Shape: {frames.shape}")
-        if frames.ndim == 2:
-            # print("Info: Input was 2D, returning it as is (assuming single frame).")
-            return frames
-        else:
-            return None
-
-    num_frames = frames.shape[2]
-    if num_frames == 0:
-        print("Warning: frames array has zero frames along axis 2.")
-        return None
-    
-    # print(f"compute_mean_frame: original frames shape: {frames.shape}") # DEBUG
-
-    try:
-        mean_frame = np.mean(frames, axis=2, dtype=np.float64)
-        # print(f"compute_mean_frame: computed mean frame shape: {mean_frame.shape}") # DEBUG
-        return mean_frame
-    except Exception as e:
-        print(f"Error computing mean frame: {e}") # Keep Error
-        return None
-
-def extract_consistent_region(mean_frame, threshold_quantile=0.95): # Use quantile parameter
+    Calculates a 2D map of mean absolute temporal gradient per pixel
+    ONLY for frames within the specified interval [start_frame, end_frame).
     """
-    Extracts the consistently bright region from the mean frame using PERCENTILE 
-    thresholding and morphology.
-    Returns the mask of the largest connected component AND its area in pixels.
-    """
-    if mean_frame is None or mean_frame.size == 0 or mean_frame.ndim != 2:
-        print("Warning: Mean frame is invalid, None, or not 2D.")
-        return None, np.nan
-
-    proc_frame = mean_frame.copy()
-
-    if np.isnan(proc_frame).any():
-        print("Warning: NaNs detected in mean_frame. Replacing with min value.")
-        min_val = np.nanmin(proc_frame)
-        if np.isnan(min_val):
-             print("Error: Mean frame consists entirely of NaNs.")
-             return None, np.nan
-        proc_frame = np.nan_to_num(proc_frame, nan=min_val)
-
-    if proc_frame.size > 0:
-         try:
-             # Calculate threshold based on percentile of NON-NaN values
-             threshold_value = np.percentile(proc_frame, threshold_quantile * 100) 
-             print(f"  Calculated threshold ({threshold_quantile*100}th percentile): {threshold_value:.4f}")
-         except IndexError: # Handles empty array case, though size check should prevent it
-             print("Warning: Could not calculate percentile (empty array after NaN handling?). Setting threshold to max.")
-             threshold_value = np.max(proc_frame) # Fallback, likely results in empty mask
-    else:
-        print("Warning: Frame has size 0 after NaN check.")
-        return np.zeros_like(mean_frame, dtype=bool), 0.0
-
-    # Handle case where threshold is calculated as non-positive
-    if threshold_value <= 1e-6:
-         print(f"Warning: Calculated percentile threshold ({threshold_value:.4f}) is near zero. Adjust quantile or check data. Using small positive epsilon.")
-         # Use a very small positive value if threshold is zero or negative
-         # Or consider falling back to Otsu's method below if percentile consistently fails
-         threshold_value = 1e-6 
-
-
-    binary_mask = (proc_frame >= threshold_value).astype(np.uint8)
-    
-    # Check if initial mask is empty - percentile might be too high
-    if not np.any(binary_mask):
-        print(f"Warning: Binary mask is empty after percentile thresholding ({threshold_quantile=}). Returning empty mask/zero area.")
-        return np.zeros_like(mean_frame, dtype=bool), 0.0
-
-    kernel_size = min(5, mean_frame.shape[0] // 10, mean_frame.shape[1] // 10)
-    kernel_size = max(kernel_size, 1)
-    kernel = np.ones((kernel_size, kernel_size), np.uint8)
-    
-    try:
-        mask_clean = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
-    except cv2.error as e:
-         print(f"Warning: OpenCV morphology error: {e}. Using binary mask directly.")
-         mask_clean = binary_mask
-
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_clean, connectivity=8)
-
-    region_mask = np.zeros_like(mean_frame, dtype=bool)
-    region_area = 0.0
-
-    if num_labels <= 1:
-        print("Warning: No connected components found after morphology.")
-    else:
-        largest_label_idx = np.argmax(stats[1:, cv2.CC_STAT_AREA])
-        largest_label = largest_label_idx + 1
-        region_mask = (labels == largest_label)
-        if np.any(region_mask):
-             region_area = np.sum(region_mask)
-             # print(f"extract_consistent_region: Found region mask with {region_area} pixels.") # DEBUG
-        else:
-             print("Warning: Largest component mask is empty.")
-             region_area = 0.0
-
-    return region_mask, region_area
-
-def compute_temporal_gradient_in_interval(frames, region_mask, start_frame, end_frame):
-    """
-    Computes mean absolute temporal gradient of average intensity within the 
-    specified region mask for frames in the [start_frame, end_frame) interval.
-    
-    Args:
-        frames (np.ndarray): The video frames (H, W, N).
-        region_mask (np.ndarray): Boolean mask (H, W) for the region of interest.
-        start_frame (int): The starting frame index (inclusive).
-        end_frame (int): The ending frame index (exclusive).
-
-    Returns:
-        float: mean_abs_gradient or np.nan if calculation fails.
-    """
-    if frames is None or frames.ndim != 3 or frames.shape[2] == 0:
-        print(f"Warning: Invalid frames provided for gradient interval {start_frame}-{end_frame}.") # Keep Warning
-        return np.nan
-    if region_mask is None or not np.any(region_mask) or region_mask.shape != frames.shape[:2]:
-        print(f"Warning: Invalid or mismatched region mask for gradient interval {start_frame}-{end_frame}.") # Keep Warning
-        return np.nan
-
+    if frames is None or frames.ndim != 3: return None
     total_frames_available = frames.shape[2]
-    
     actual_start = max(0, start_frame)
     actual_end = min(total_frames_available, end_frame)
 
-    # Need at least 2 frames to compute differences
-    if actual_end - actual_start < 2:
-        print(f"Warning: Not enough frames ({actual_end - actual_start}) in adjusted interval [{actual_start}, {actual_end}) "
-              f"for requested interval {start_frame}-{end_frame} to compute gradient.") # Keep Warning
-        return np.nan
+    if actual_end - actual_start < 2: # Need at least 2 frames in interval for diff
+        # print(f"Warning: Interval {start_frame}-{end_frame} has < 2 frames ({actual_end - actual_start}). Cannot calculate gradient map.")
+        return None
 
-    # print(f"compute_temporal_gradient: Processing frames {actual_start} to {actual_end-1} for interval {start_frame}-{end_frame}.") # DEBUG
-    
+    height, width = frames.shape[:2]
+    gradient_sum = np.zeros((height, width), dtype=np.float64)
+    valid_diff_count = 0
+
+    # Iterate through frames WITHIN the interval
+    for i in range(actual_start + 1, actual_end):
+        try:
+            diff = np.abs(frames[:, :, i].astype(np.float64) - frames[:, :, i-1].astype(np.float64))
+            gradient_sum += diff
+            valid_diff_count += 1
+        except IndexError: # Should be prevented by loop bounds, but safety
+             print(f"Index error accessing frame {i} or {i-1} in interval {start_frame}-{end_frame}")
+             continue
+        except Exception as e:
+            print(f"Error calculating diff between frame {i}/{i-1} in interval: {e}")
+            continue
+
+    if valid_diff_count == 0:
+        print(f"Warning: No valid frame differences in interval {start_frame}-{end_frame}.")
+        return None
+
+    mean_gradient_map = gradient_sum / valid_diff_count
+    # print(f"  Interval {start_frame}-{end_frame} gradient map calculated.") # Optional Debug
+    return mean_gradient_map
+
+# --- RENAMED: Extract hotspot from a generic activity map ---
+def extract_hotspot_from_map(activity_map, threshold_quantile=0.98):
+    """
+    Extracts the hotspot mask (region of highest activity) from a 2D map
+    (e.g., a combined gradient map).
+    """
+    if activity_map is None or activity_map.size == 0: return None, np.nan
+    proc_map = activity_map.copy(); nan_mask = np.isnan(proc_map)
+    if np.all(nan_mask): return None, np.nan
+    valid_pixels = proc_map[~nan_mask]
+    if valid_pixels.size == 0: return np.zeros_like(activity_map, dtype=bool), 0.0
+
+    map_std = np.std(valid_pixels); map_max = np.max(valid_pixels)
+    if map_max < 1e-6 or map_std < 1e-6:
+        print("Warning: Activity map has low variation. Hotspot detection may fail.")
+        return np.zeros_like(activity_map, dtype=bool), 0.0
+
+    try: threshold_value = np.percentile(valid_pixels, threshold_quantile * 100)
+    except IndexError: threshold_value = map_max
+    print(f"  Hotspot threshold ({threshold_quantile*100}th percentile on activity map): {threshold_value:.4f}")
+
+    if threshold_value <= 1e-6 and map_max > 1e-6: threshold_value = 1e-6
+    binary_mask = (np.nan_to_num(proc_map, nan=-np.inf) >= threshold_value).astype(np.uint8)
+    if not np.any(binary_mask):
+        print(f"Warning: Binary mask empty after thresholding activity map (quantile={threshold_quantile}).")
+        return np.zeros_like(activity_map, dtype=bool), 0.0
+
+    kernel_size = max(min(3, activity_map.shape[0]//20, activity_map.shape[1]//20), 1)
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    try: mask_clean = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
+    except cv2.error: mask_clean = binary_mask
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_clean, connectivity=8)
+    hotspot_mask = np.zeros_like(activity_map, dtype=bool); hotspot_area = 0.0
+    if num_labels > 1:
+        largest_label_idx = np.argmax(stats[1:, cv2.CC_STAT_AREA])
+        largest_label = largest_label_idx + 1
+        hotspot_mask = (labels == largest_label)
+        hotspot_area = np.sum(hotspot_mask)
+        if hotspot_area == 0: print("Warning: Largest component mask (hotspot) empty.")
+    # else: print("Warning: No connected components in thresholded activity map.") # Reduce noise
+
+    return hotspot_mask, hotspot_area
+
+# --- Temporal Feature Calculations (No change needed, just use correct mask) ---
+def compute_temporal_gradient_in_interval(frames, hotspot_mask, start_frame, end_frame):
+    # (Code remains the same as previous version)
     intensity_series = []
+    if frames is None or frames.ndim != 3 or frames.shape[2] == 0: return np.nan
+    if hotspot_mask is None or not np.any(hotspot_mask) or hotspot_mask.shape != frames.shape[:2]: return np.nan
+    total_frames = frames.shape[2]
+    actual_start = max(0, start_frame); actual_end = min(total_frames, end_frame)
+    if actual_end - actual_start < 2: return np.nan
     for fidx in range(actual_start, actual_end):
         try:
             frame = frames[:, :, fidx]
-            if frame is None or frame.shape != region_mask.shape:
-                 print(f"Warning: Frame {fidx} has unexpected shape or is None. Skipping.") # Keep Warning
-                 continue
-                 
-            masked_pixels = frame[region_mask]
-            if masked_pixels.size == 0:
-                print(f"Warning: No pixels selected by mask for frame {fidx}. Skipping.") # Keep Warning
-                continue
-            
+            if frame is None or frame.shape != hotspot_mask.shape: continue
+            masked_pixels = frame[hotspot_mask]
+            if masked_pixels.size == 0: continue
             avg_intensity = np.mean(masked_pixels)
-            if not np.isfinite(avg_intensity):
-                 print(f"Warning: Non-finite average intensity calculated for frame {fidx}. Skipping.") # Keep Warning
-                 continue
-
+            if not np.isfinite(avg_intensity): continue
             intensity_series.append(avg_intensity)
-            
-        except IndexError:
-             print(f"Error: IndexError accessing frame {fidx}. Total frames: {total_frames_available}") # Keep Error
-             continue
-        except Exception as e:
-             print(f"Error processing frame {fidx}: {type(e).__name__} - {e}") # Keep Error
-             continue
+        except Exception as e: print(f"Error processing frame {fidx} for hotspot gradient: {e}"); continue
+    if len(intensity_series) < 2: return np.nan
+    mean_abs_gradient = np.mean(np.abs(np.diff(np.array(intensity_series))))
+    return mean_abs_gradient if np.isfinite(mean_abs_gradient) else np.nan
 
-    if len(intensity_series) < 2:
-        print(f"Warning: Not enough valid intensity values ({len(intensity_series)}) collected in interval {start_frame}-{end_frame} for gradient.") # Keep Warning
-        return np.nan
+def compute_temporal_std_dev_in_interval(frames, hotspot_mask, start_frame, end_frame):
+    # (Code remains the same as previous version)
+    intensity_series = []
+    if frames is None or frames.ndim != 3 or frames.shape[2] == 0: return np.nan
+    if hotspot_mask is None or not np.any(hotspot_mask) or hotspot_mask.shape != frames.shape[:2]: return np.nan
+    total_frames = frames.shape[2]
+    actual_start = max(0, start_frame); actual_end = min(total_frames, end_frame)
+    if actual_end - actual_start < 2: return np.nan
+    for fidx in range(actual_start, actual_end):
+        try:
+            frame = frames[:, :, fidx]
+            if frame is None or frame.shape != hotspot_mask.shape: continue
+            masked_pixels = frame[hotspot_mask]
+            if masked_pixels.size == 0: continue
+            avg_intensity = np.mean(masked_pixels)
+            if not np.isfinite(avg_intensity): continue
+            intensity_series.append(avg_intensity)
+        except Exception as e: print(f"Error processing frame {fidx} for hotspot std dev: {e}"); continue
+    if len(intensity_series) < 2: return np.nan
+    std_dev = np.std(np.array(intensity_series))
+    return std_dev if np.isfinite(std_dev) else np.nan
 
-    intensity_series = np.array(intensity_series)
-    
-    gradient = np.diff(intensity_series)
-    mean_abs_gradient = np.mean(np.abs(gradient))
-    
-    mean_abs_gradient = mean_abs_gradient if np.isfinite(mean_abs_gradient) else np.nan
 
-    # To caculate Standard deviation of avg intensites
-    std_dev = np.std(intensity_series)
-    std_dev = std_dev if np.isfinite(std_dev) else np.nan
-    
-    # print(f"  Gradient for {start_frame}-{end_frame}: {mean_abs_gradient:.4f}") # DEBUG
-
-    return mean_abs_gradient
-
-# --- MODIFIED: Extracts Area and Interval Gradients ---
-def extract_bright_region_features(frames):
+# --- REVISED: Main extraction function following professor's workflow ---
+def extract_bright_region_features(frames, source_folder_name, mat_filename_no_ext, visualize_index=-1):
     """
-    Extracts features from the consistently brightest region:
-    1. Area: Total pixel count of the bright region identified from the mean frame.
-    2. Interval Gradients: Mean absolute temporal gradient over successive FRAME-BASED intervals.
-    
-    Assumes frames are (Height, Width, NumFrames).
+    Extracts features based on the DYNAMIC hotspot identified from interval-based
+    temporal gradient maps.
 
-    Returns a dictionary of features named like:
-      {
-        "bright_region_area": value, 
-        "bright_region_grad_0_50": value, 
-        "bright_region_grad_50_100": value,
-        ...
-      }
-    Returns an empty dictionary or dictionary with NaNs if critical steps fail.
+    Workflow:
+    1. Calculate gradient map for each time interval.
+    2. Combine interval maps (e.g., by averaging) into a single activity map.
+    3. Extract hotspot mask from the combined activity map.
+    4. Calculate features (area, interval grad/std) using the hotspot mask on original frames.
+
+    Args:
+        frames (np.ndarray): Video frames (H, W, N).
+        source_folder_name (str): Parent directory name of the mat file.
+        mat_filename_no_ext (str): Mat file name without extension.
+        visualize_index (int): Sample index for visualization control.
+
+    Returns:
+        dict: Dictionary of calculated features.
     """
     # --- Configuration ---
     interval_frames = getattr(config, 'FRAME_INTERVAL_SIZE', 50)
-    #threshold_factor = getattr(config, 'BRIGHT_REGION_THRESHOLD', 0.8)
-    threshold_quantile = getattr(config, 'BRIGHT_REGION_QUANTILE', 0.95) # Add this to config or use default 0.95
+    max_intervals = getattr(config, 'MAX_FRAME_INTERVALS', 3)
+    hotspot_quantile = getattr(config, 'GRADIENT_MAP_HOTSPOT_QUANTILE', 0.98) # Quantile for combined map
     calculate_std = getattr(config, 'CALCULATE_STD_FEATURES', False)
-    
-    # --- Initialize features dictionary ---
-    features = {} 
-    # Define the area feature key explicitly
-    area_feat_name = "bright_region_area"
-    features[area_feat_name] = np.nan 
+    save_vis = getattr(config, 'SAVE_FOCUS_AREA_VISUALIZATION', False)
+    num_to_visualize = getattr(config, 'NUM_SAMPLES_TO_VISUALIZE', 0)
+    base_vis_save_dir = getattr(config, 'FOCUS_AREA_VIS_SAVE_DIR', None)
+    vis_orig_colormap = getattr(config, 'VISUALIZATION_COLORMAP', cv2.COLORMAP_HOT)
+    vis_grad_colormap = getattr(config, 'VISUALIZATION_GRADIENT_MAP_COLORMAP', cv2.COLORMAP_INFERNO)
 
-    # --- Input Validation ---
-    if frames is None or not isinstance(frames, np.ndarray) or frames.ndim != 3 or frames.shape[2] == 0:
-        print(f"Warning: Invalid or empty frames array passed to extract_bright_region_features. Shape: {getattr(frames, 'shape', 'None')}") # Keep Warning
-        return features # Return dict with Area=NaN
 
+    print(f"Extracting DYNAMIC features for: Folder='{source_folder_name}', File='{mat_filename_no_ext}.mat'")
+    features = {}; area_feat_name = "hotspot_area"; features[area_feat_name] = np.nan
+
+    if frames is None or frames.ndim != 3 or frames.shape[2] < 2:
+        print("Warning: Invalid/insufficient frames."); return features
     num_frames = frames.shape[2]
-    # print(f"extract_bright_region_features: received frames with shape: {frames.shape} ({num_frames} frames). Interval size: {interval_frames} frames.") # DEBUG
 
-    # --- Compute Mean and Mask & Area ---
-    mean_frame = compute_mean_frame(frames)
-    if mean_frame is None:
-        print("Warning: Mean frame could not be computed.")
-        return features 
+    # --- Step 1: Calculate Interval Gradient Maps ---
+    interval_gradient_maps = []
+    print("  Calculating interval gradient maps...")
+    for i in range(max_intervals):
+        start_frame = i * interval_frames
+        # Ensure start frame is valid, break if we request intervals beyond available frames
+        if start_frame >= num_frames -1: # Need at least 2 frames starting from start_frame
+             print(f"  Skipping interval {i} ({start_frame}-...) as it starts too late.")
+             break
+        end_frame = start_frame + interval_frames
+        # No need to cap end_frame here, compute_interval_gradient_map handles it
+        interval_map = compute_interval_gradient_map(frames, start_frame, end_frame)
+        if interval_map is not None:
+            interval_gradient_maps.append(interval_map)
+        else:
+            print(f"  Warning: Failed to calculate gradient map for interval {i} ({start_frame}-{end_frame}).")
+            # Optionally append None or just skip
 
+    if not interval_gradient_maps:
+        print("Error: Failed to calculate ANY interval gradient maps.")
+        return features # Return dict with only area=NaN
 
-    region_mask, region_area = extract_consistent_region(mean_frame, threshold_quantile=threshold_quantile) 
-    
-    features[area_feat_name] = region_area 
+    # --- Step 2: Combine Gradient Maps ---
+    # Combine by averaging the valid interval maps
+    print(f"  Combining {len(interval_gradient_maps)} interval gradient map(s)...")
+    # Use np.stack then np.mean, handling potential NaNs if needed
+    try:
+         # Stack valid maps, mean along the new axis (axis=0)
+         combined_activity_map = np.mean(np.stack(interval_gradient_maps, axis=0), axis=0)
+    except ValueError as e: # Handles case where interval maps might have different shapes (shouldn't happen) or empty list
+         print(f"Error combining interval maps: {e}. Cannot proceed.")
+         return features
 
-    if region_mask is None or not np.any(region_mask):
-        print("Warning: Region extraction failed or resulted in empty mask.")
+    # --- Step 3: Extract Hotspot from Combined Map ---
+    print(f"  Extracting hotspot from combined activity map using quantile {hotspot_quantile}...")
+    hotspot_mask, hotspot_area = extract_hotspot_from_map(combined_activity_map, threshold_quantile=hotspot_quantile)
+    features[area_feat_name] = hotspot_area # Store the dynamic hotspot area
+
+    if hotspot_mask is None or not np.any(hotspot_mask):
+        print("Warning: Dynamic hotspot extraction failed or resulted in empty mask.")
+        # Keep the area feature (might be 0), return before calculating temporal features
         return features
 
-    # --- Iterate through Frame Intervals for Gradients ---
-    start_frame = 0
-    while start_frame < num_frames:
-        end_frame = start_frame + interval_frames
-        
-        # Define feature name for this interval's gradient
-        grad_feat_name = f"bright_region_grad_{start_frame}_{end_frame}"
-        
-        # Compute ONLY the gradient for the interval [start_frame, end_frame)
-        mean_abs_grad = compute_temporal_gradient_in_interval(
-            frames, region_mask, start_frame, end_frame
-        )
-        
-        # Store the gradient result (even if it is NaN)
-        features[grad_feat_name] = mean_abs_grad
-        
-        # Standard deviation caluclation (optional and configurable via flag)
-        if calculate_std:
-            std_feat_name = f"bright_region_std_{start_frame}_{end_frame}"
-            std_dev = compute_temporal_gradient_in_interval(
-                frames, region_mask, start_frame, end_frame
-            )
-            features[std_feat_name] = std_dev
-        
-        # Move to the next interval
-        start_frame += interval_frames
+    # --- Optional Visualization ---
+    if save_vis and visualize_index >= 0 and visualize_index < num_to_visualize and base_vis_save_dir:
+        if frames.shape[2] > 0:
+             mean_frame_for_vis = compute_mean_frame(frames)
+             final_vis_dir = os.path.join(base_vis_save_dir, source_folder_name, mat_filename_no_ext)
+             save_dynamic_hotspot_visualizations( # Call the updated vis function
+                 original_frame=frames[:, :, 0],
+                 mean_frame=mean_frame_for_vis,
+                 interval_gradient_maps=interval_gradient_maps, # Pass the list
+                 combined_gradient_map=combined_activity_map,   # Pass the combined map
+                 hotspot_mask=hotspot_mask,                    # Pass the final mask
+                 index=visualize_index,
+                 save_dir=final_vis_dir,
+                 orig_colormap=vis_orig_colormap,
+                 grad_colormap=vis_grad_colormap
+             )
+        else: print("Warning: Cannot visualize, no frames available.")
 
-    if len(features) == 1 and area_feat_name in features: # Only area was calculated
-         print("Warning: Only area feature was calculated. No gradient intervals were processed (e.g., num_frames < 2).") # Keep Warning
-         
+    # --- Step 4: Extract Interval Features using Hotspot Mask ---
+    print("  Extracting interval features within dynamic hotspot...")
+    for i in range(max_intervals):
+         start_frame = i * interval_frames
+         if start_frame >= num_frames -1: break # Don't calculate for intervals that don't exist
+         end_frame = start_frame + interval_frames
+         # Use "hotspot_" prefix for clarity
+         grad_feat_name = f"hotspot_grad_{start_frame}_{end_frame}"
+         std_feat_name = f"hotspot_std_{start_frame}_{end_frame}"
+
+         # Calculate gradient using the final hotspot mask
+         mean_abs_grad = compute_temporal_gradient_in_interval(frames, hotspot_mask, start_frame, end_frame)
+         features[grad_feat_name] = mean_abs_grad
+
+         # Calculate std dev using the final hotspot mask (conditionally)
+         if calculate_std:
+             std_dev = compute_temporal_std_dev_in_interval(frames, hotspot_mask, start_frame, end_frame)
+             features[std_feat_name] = std_dev
+
+    print(f"  Finished extracting dynamic features. Keys: {list(features.keys())}")
     return features
+
+# --- END OF FILE feature_engineering.py ---
