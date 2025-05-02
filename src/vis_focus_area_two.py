@@ -144,66 +144,86 @@ def compute_slope_map(frames, fps=30.0, start_frame=0, duration_frames=None):
 
 
 def extract_hotspot_from_map(activity_map, threshold_quantile=0.95, morphology_op='close',
-                             apply_blur=False, blur_kernel_size=(3, 3)):
+                             apply_blur=False, blur_kernel_size=(3, 3),
+                             roi_mask=None): # Add roi_mask argument
     """
-    Extracts the hotspot mask from a 2D activity map, with optional pre-blurring.
-    (Code from previous version is suitable, no changes needed here based on new requirements)
+    Extracts the hotspot mask from a 2D activity map, optionally applying ROI mask,
+    pre-blurring, and morphology.
     """
     if activity_map is None or activity_map.size == 0:
         print("Warning: Activity map is None or empty in extract_hotspot_from_map.")
         return None, np.nan
 
-    # --- Optional Pre-filtering ---
-    map_to_process = activity_map.copy()
+    # --- Apply ROI Mask FIRST ---
+    if roi_mask is not None:
+        if roi_mask.shape != activity_map.shape:
+            print("Warning: ROI mask shape mismatch. Ignoring ROI mask.")
+            map_to_process = activity_map.copy()
+        else:
+            # Set activity outside ROI to NaN or a very low value (e.g., -inf)
+            # so it won't be picked by thresholding or affect stats. Using NaN is safer.
+            map_to_process = activity_map.copy()
+            map_to_process[~roi_mask] = np.nan # Apply ROI mask
+            print("  Applied ROI mask to activity map.")
+    else:
+        map_to_process = activity_map.copy() # No ROI mask applied
+
+    # --- Optional Pre-filtering (Blurring) ---
     if apply_blur:
-        try:
-            # Ensure kernel dimensions are odd
-            k_h = blur_kernel_size[0] if blur_kernel_size[0] % 2 != 0 else blur_kernel_size[0] + 1
-            k_w = blur_kernel_size[1] if blur_kernel_size[1] % 2 != 0 else blur_kernel_size[1] + 1
-            map_to_process = cv2.GaussianBlur(map_to_process, (k_w, k_h), 0)
-            # print(f"  Applied Gaussian Blur with kernel ({k_w}, {k_h})") # Less verbose
-        except Exception as e:
-            print(f"Warning: Failed to apply Gaussian Blur: {e}. Proceeding without blur.")
-            map_to_process = activity_map.copy() # Revert to original if blur fails
+        # Check if map_to_process became all NaN after ROI masking
+        if np.all(np.isnan(map_to_process)):
+             print("Warning: map_to_process is all NaN after ROI masking, skipping blur.")
+        else:
+            try:
+                # Ensure kernel dimensions are odd
+                k_h = blur_kernel_size[0] if blur_kernel_size[0] % 2 != 0 else blur_kernel_size[0] + 1
+                k_w = blur_kernel_size[1] if blur_kernel_size[1] % 2 != 0 else blur_kernel_size[1] + 1
+                # Apply blur only on the potentially masked map
+                # Note: GaussianBlur ignores NaNs implicitly depending on OpenCV version/build,
+                # or you might need nan-aware blur if issues arise.
+                map_to_process = cv2.GaussianBlur(map_to_process, (k_w, k_h), 0)
+                # print(f"  Applied Gaussian Blur with kernel ({k_w}, {k_h})")
+            except Exception as e:
+                print(f"Warning: Failed to apply Gaussian Blur: {e}. Proceeding without blur.")
+                # Revert map_to_process if blur failed - careful if ROI was applied
+                if roi_mask is not None: map_to_process[~roi_mask] = np.nan # Re-apply ROI if reverting
+                else: map_to_process = activity_map.copy() # Revert to original if no ROI
 
-    # --- Continue with processing the (potentially blurred) map ---
+    # --- Continue with processing the (masked and potentially blurred) map ---
     proc_map = map_to_process
+    # IMPORTANT: Need to handle NaNs correctly for percentile calculation now
     nan_mask = np.isnan(proc_map)
-    if np.all(nan_mask):
-        print("Warning: Activity map is all NaNs after potential blur.")
-        return None, np.nan # All NaNs
+    if np.all(nan_mask): # Could happen if ROI excludes all non-NaNs
+        print("Warning: Activity map is all NaNs after ROI/blur.")
+        return None, np.nan
 
-    valid_pixels = proc_map[~nan_mask]
+    valid_pixels = proc_map[~nan_mask] # Get only the valid (non-NaN) pixels
     if valid_pixels.size == 0:
-        print("Warning: No valid pixels found in activity map after potential blur.")
-        return np.zeros_like(activity_map, dtype=bool), 0.0 # All valid pixels were NaN?
+        print("Warning: No valid (non-NaN) pixels found in activity map.")
+        return np.zeros_like(activity_map, dtype=bool), 0.0
 
     map_std = np.std(valid_pixels)
     map_max = np.max(valid_pixels)
 
-    # Check for empty or flat map
     if map_max < 1e-9 or map_std < 1e-9:
-        # print("Warning: Activity map has near-zero variation. Hotspot detection may fail.")
-        return np.zeros_like(activity_map, dtype=bool), 0.0
+         return np.zeros_like(activity_map, dtype=bool), 0.0
 
-    # Calculate threshold
     try:
+        # Calculate percentile ONLY on valid pixels
         threshold_value = np.percentile(valid_pixels, threshold_quantile * 100)
     except IndexError:
         print("Warning: Percentile calculation failed, using max value as threshold.")
-        threshold_value = map_max # Fallback if percentile fails
+        threshold_value = map_max
 
-    # Ensure threshold isn't effectively zero if max is non-zero
     if threshold_value <= 1e-9 and map_max > 1e-9:
         threshold_value = 1e-9
 
-    # --- Thresholding ---
+    # --- Thresholding (handle NaNs) ---
+    # Pixels outside ROI are already NaN. Thresholding NaNs results in False.
     binary_mask = (np.nan_to_num(proc_map, nan=-np.inf) >= threshold_value).astype(np.uint8)
-    if not np.any(binary_mask):
-        # print(f"Warning: Binary mask empty after thresholding activity map (quantile={threshold_quantile}).")
-        return np.zeros_like(activity_map, dtype=bool), 0.0
 
-    # --- Morphological Operations ---
+    # --- Rest of morphology and connected components remains the same ---
+    # ... (keep the morphology and connected components logic as before) ...
     mask_processed = binary_mask.copy()
     kernel_size_dim = max(min(3, activity_map.shape[0]//20, activity_map.shape[1]//20), 1)
     kernel_close = np.ones((kernel_size_dim, kernel_size_dim), np.uint8)
@@ -224,7 +244,6 @@ def extract_hotspot_from_map(activity_map, threshold_quantile=0.95, morphology_o
         print(f"Warning: OpenCV error during morphology '{morphology_op}': {e}. Using raw binary mask.")
         mask_processed = binary_mask
 
-    # --- Connected Components ---
     try:
         num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_processed, connectivity=8)
     except cv2.error as e:
@@ -242,7 +261,6 @@ def extract_hotspot_from_map(activity_map, threshold_quantile=0.95, morphology_o
                  hotspot_mask = (labels == largest_label)
                  hotspot_area = np.sum(hotspot_mask)
     return hotspot_mask, hotspot_area
-
 
 def save_visualizations(
     original_frame, mean_frame, interval_gradient_maps, activity_map,
@@ -438,6 +456,15 @@ def run_single_visualization(mat_file_path, output_base_dir, mat_key,
         traceback.print_exc()
         return False
 
+    h, w = frames.shape[:2]
+    border_h = int(h * 0.20) # Ignore 20% border top/bottom
+    border_w = int(w * 0.20) # Ignore 20% border left/right
+
+    # Create a boolean mask: True inside ROI, False outside
+    roi_mask = np.zeros((h, w), dtype=bool)
+    roi_mask[border_h:-border_h, border_w:-border_w] = True
+    print(f"  Defined ROI mask: H={border_h}-{h-border_h}, W={border_w}-{w-border_w}")
+
     # --- Calculate Focus Window ---
     focus_duration_frames = int(focus_duration_sec * fps)
     # Ensure we don't request more frames than available, and have at least 2
@@ -518,7 +545,8 @@ def run_single_visualization(mat_file_path, output_base_dir, mat_key,
         threshold_quantile=quantile,
         morphology_op=morphology_op,
         apply_blur=apply_blur,
-        blur_kernel_size=blur_kernel_size
+        blur_kernel_size=blur_kernel_size,
+        roi_mask=roi_mask
     )
     if hotspot_mask is None:
          print("  Warning: Failed hotspot extraction. Mask will not be saved/overlaid.")
