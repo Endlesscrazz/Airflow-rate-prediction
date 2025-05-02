@@ -17,7 +17,7 @@ DATASET_FOLDER = os.path.join(_project_root, "dataset_new")
 
 # Define output paths relative to project root
 # --- Renamed for clarity ---
-MODEL_SAVE_PATH = os.path.join(_project_root, "final_airflow_nn_regressor.joblib")
+MODEL_SAVE_PATH = os.path.join(_project_root, "trained_models", " final_airflow_nn_regressor.joblib")
 # --- Renamed for clarity ---
 ACTUAL_VS_PREDICTED_PLOT_SAVE_PATH = os.path.join(_project_root, "output", "actual_vs_predicted_regression.png")
 # --- Define specific directory for focus area images ---

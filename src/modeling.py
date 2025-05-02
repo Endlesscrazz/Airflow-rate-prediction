@@ -6,48 +6,61 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 
-# --- Import Only MLPRegressor ---
+# --- Import Regressors ---
 from sklearn.neural_network import MLPRegressor
+from sklearn.linear_model import LinearRegression # Added
+from sklearn.svm import SVR                     # Added
+# Removed other imports if they existed
 
-# --- Removed other model imports ---
-# from sklearn.linear_model import LinearRegression, Ridge, Lasso
-# from sklearn.svm import SVR
-# from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-
-
-# --- Updated function to return only MLPRegressor ---
+# --- Updated function to return selected regressors ---
 def get_regressors():
-    """Returns a dictionary containing only the MLPRegressor."""
-    # Increase max_iter for convergence, adjust other defaults if needed
-    # Add early_stopping=True, validation_fraction=0.1, n_iter_no_change=10 for robustness?
-    regressors = {
-        "MLPRegressor": MLPRegressor(
-            random_state=config.RANDOM_STATE,
-            max_iter=3000, # Increase max iterations
-            early_stopping=True, # Stop training when validation score is not improving
-            validation_fraction=0.1, # Use 10% of training data for validation
-            n_iter_no_change=10, # How many iterations with no improvement to wait
-            warm_start=False # Start fresh each fit
-        )
-    }
+    """Returns a dictionary containing selected regressors."""
+    regressors = {}
+
+    # a) Linear Regression (Simple Baseline)
+    #regressors["LinearRegression"] = LinearRegression()
+
+    # b) Support Vector Regression (Handles non-linearity)
+    # Default parameters are often a good starting point, tune C and epsilon later
+    regressors["SVR"] = SVR() # Can add kernel='rbf', C=1.0, epsilon=0.1 etc.
+
+    # c) MLP Regressor (Simplified Architecture)
+    regressors["MLPRegressor"] = MLPRegressor(
+        # --- Simplified Architecture ---
+        hidden_layer_sizes=(10, 5), # Reduced layers/neurons
+        # --- Other Parameters ---
+        activation='relu', # ReLU is often a good default
+        solver='adam',
+        alpha=0.001, # Slightly increased regularization default
+        batch_size='auto',
+        learning_rate_init=0.001, # Standard default
+        max_iter=3000, # Keep higher iterations
+        early_stopping=True,
+        validation_fraction=0.15, # Slightly larger validation set for small data
+        n_iter_no_change=20, # Wait a bit longer
+        random_state=config.RANDOM_STATE,
+        warm_start=False
+    )
+
+    print(f"Selected Regressors: {list(regressors.keys())}")
     return regressors
 
 def build_pipeline(model, pca_components=None):
     """Builds a standard pipeline: Imputer -> Scaler -> Model."""
     steps = []
-    # 1. Impute missing values (essential)
-    steps.append(('imputer', SimpleImputer(strategy='mean'))) # Mean imputation is common
+    # 1. Impute missing values
+    steps.append(('imputer', SimpleImputer(strategy='mean')))
 
-    # 2. Scale features (CRITICAL for Neural Networks)
+    # 2. Scale features (Important for SVR and MLP)
     steps.append(('scaler', StandardScaler()))
 
-    # 3. PCA (Currently Disabled in config)
+    # 3. PCA (Optional)
     if pca_components is not None and isinstance(pca_components, int) and pca_components > 0:
         from sklearn.decomposition import PCA
         steps.append(('pca', PCA(n_components=pca_components, random_state=config.RANDOM_STATE)))
-        print(f"--- Pipeline: PCA Enabled with n_components={pca_components} ---")
-    else:
-         print("--- Pipeline: PCA Disabled ---")
+        # print(f"--- Pipeline: PCA Enabled with n_components={pca_components} ---") # Reduce verbosity
+    # else:
+        # print("--- Pipeline: PCA Disabled ---") # Reduce verbosity
 
 
     # 4. Add the regressor model

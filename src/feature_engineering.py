@@ -1,274 +1,243 @@
 # --- START OF FILE feature_engineering.py ---
 
 # feature_engineering.py
-"""Functions for extracting features based on the DYNAMIC hotspot region
-identified from interval-based temporal gradient maps.
+"""
+Functions for extracting features using pre-computed hotspot masks.
 """
 
 import numpy as np
 import cv2
 import os
-import config
-# Import the updated visualization function
-from visualization_util import save_dynamic_hotspot_visualizations
+import scipy
+import config 
+from scipy.stats import linregress
+from tqdm import tqdm
+from scipy import stats as sp_stats
 
-# --- Mean Frame Calculation (Still needed for visualization comparison) ---
-def compute_mean_frame(frames):
-    if frames is None or frames.ndim != 3 or frames.shape[2] == 0: return None
-    try: return np.mean(frames, axis=2, dtype=np.float64)
-    except Exception: return None
+from hotspot_mask_generation import apply_preprocessing
 
-# --- NEW: Calculate Gradient Map for ONE Interval ---
-def compute_interval_gradient_map(frames, start_frame, end_frame):
-    """
-    Calculates a 2D map of mean absolute temporal gradient per pixel
-    ONLY for frames within the specified interval [start_frame, end_frame).
-    """
-    if frames is None or frames.ndim != 3: return None
-    total_frames_available = frames.shape[2]
-    actual_start = max(0, start_frame)
-    actual_end = min(total_frames_available, end_frame)
-
-    if actual_end - actual_start < 2: # Need at least 2 frames in interval for diff
-        # print(f"Warning: Interval {start_frame}-{end_frame} has < 2 frames ({actual_end - actual_start}). Cannot calculate gradient map.")
-        return None
-
-    height, width = frames.shape[:2]
-    gradient_sum = np.zeros((height, width), dtype=np.float64)
-    valid_diff_count = 0
-
-    # Iterate through frames WITHIN the interval
-    for i in range(actual_start + 1, actual_end):
+def calculate_weighted_slope_activity_map(frames_focus, fps, smooth_window,
+                                           envir_para, errorweight, augment, roi_mask=None):
+    # (Copy function from hotspot_mask_generation.py)
+    H, W, T_focus = frames_focus.shape
+    t_focus_vec = (np.arange(T_focus) / fps).astype(np.float64)
+    final_activity_map = np.zeros((H, W), dtype=np.float64)
+    if smooth_window > 1:
+        smooth_len = len(np.convolve(np.ones(T_focus), np.ones(smooth_window), mode='valid'))
+        if smooth_len < 2: print(f"ERROR: Smoothing window too large."); return None
+        t_smoothed = t_focus_vec[:smooth_len]
+    else: t_smoothed = t_focus_vec
+    if roi_mask is not None:
+        roi_indices = np.argwhere(roi_mask); iterator = tqdm(range(roi_indices.shape[0]), desc="Calculating Slope (ROI)", leave=False, ncols=80); get_coords = lambda idx: roi_indices[idx]
+    else:
+        total_pixels = H * W; iterator = tqdm(range(total_pixels), desc="Calculating Slope (Full)", leave=False, ncols=80); get_coords = lambda idx: np.unravel_index(idx, (H, W))
+    for idx in iterator:
+        r, c = get_coords(idx); y_raw = frames_focus[r, c, :]
+        if smooth_window > 1:
+            if len(y_raw) >= smooth_window: y = np.convolve(y_raw, np.ones(smooth_window)/smooth_window, mode='valid')
+            else: y = y_raw; t_smoothed = t_focus_vec
+        else: y = y_raw
+        if len(y) < 2: continue
         try:
-            diff = np.abs(frames[:, :, i].astype(np.float64) - frames[:, :, i-1].astype(np.float64))
-            gradient_sum += diff
-            valid_diff_count += 1
-        except IndexError: # Should be prevented by loop bounds, but safety
-             print(f"Index error accessing frame {i} or {i-1} in interval {start_frame}-{end_frame}")
-             continue
-        except Exception as e:
-            print(f"Error calculating diff between frame {i}/{i-1} in interval: {e}")
-            continue
+            if not np.all(np.isfinite(y)): continue
+            current_t = t_smoothed[:len(y)]
+            if len(current_t) < 2: continue
+            res = sp_stats.linregress(current_t, y)
+            if np.isfinite(res.slope) and np.isfinite(res.stderr):
+                s = res.slope; se = res.stderr
+                if s * envir_para < 0:
+                    if abs(s) > 1e-9:
+                        rel_err = abs(se / s); weight = np.exp(-rel_err * errorweight)
+                        final_activity_map[r, c] = (abs(s) * weight)**augment
+        except ValueError: pass
+        except Exception as e_lr: print(f"\nWarning: linregress/weighting failed at ({r},{c}): {e_lr}"); pass
+    return final_activity_map
+# --- End of copied helper functions ---
 
-    if valid_diff_count == 0:
-        print(f"Warning: No valid frame differences in interval {start_frame}-{end_frame}.")
-        return None
 
-    mean_gradient_map = gradient_sum / valid_diff_count
-    # print(f"  Interval {start_frame}-{end_frame} gradient map calculated.") # Optional Debug
-    return mean_gradient_map
-
-# --- RENAMED: Extract hotspot from a generic activity map ---
-def extract_hotspot_from_map(activity_map, threshold_quantile=0.98):
+def calculate_features_from_mask_and_activity(
+    frames,
+    hotspot_mask,
+    activity_map, # Add activity map as input
+    fps,
+    focus_duration_frames
+    ):
     """
-    Extracts the hotspot mask (region of highest activity) from a 2D map
-    (e.g., a combined gradient map).
-    """
-    if activity_map is None or activity_map.size == 0: return None, np.nan
-    proc_map = activity_map.copy(); nan_mask = np.isnan(proc_map)
-    if np.all(nan_mask): return None, np.nan
-    valid_pixels = proc_map[~nan_mask]
-    if valid_pixels.size == 0: return np.zeros_like(activity_map, dtype=bool), 0.0
-
-    map_std = np.std(valid_pixels); map_max = np.max(valid_pixels)
-    if map_max < 1e-6 or map_std < 1e-6:
-        print("Warning: Activity map has low variation. Hotspot detection may fail.")
-        return np.zeros_like(activity_map, dtype=bool), 0.0
-
-    try: threshold_value = np.percentile(valid_pixels, threshold_quantile * 100)
-    except IndexError: threshold_value = map_max
-    print(f"  Hotspot threshold ({threshold_quantile*100}th percentile on activity map): {threshold_value:.4f}")
-
-    if threshold_value <= 1e-6 and map_max > 1e-6: threshold_value = 1e-6
-    binary_mask = (np.nan_to_num(proc_map, nan=-np.inf) >= threshold_value).astype(np.uint8)
-    if not np.any(binary_mask):
-        print(f"Warning: Binary mask empty after thresholding activity map (quantile={threshold_quantile}).")
-        return np.zeros_like(activity_map, dtype=bool), 0.0
-
-    kernel_size = max(min(3, activity_map.shape[0]//20, activity_map.shape[1]//20), 1)
-    kernel = np.ones((kernel_size, kernel_size), np.uint8)
-    try: mask_clean = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
-    except cv2.error: mask_clean = binary_mask
-
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask_clean, connectivity=8)
-    hotspot_mask = np.zeros_like(activity_map, dtype=bool); hotspot_area = 0.0
-    if num_labels > 1:
-        largest_label_idx = np.argmax(stats[1:, cv2.CC_STAT_AREA])
-        largest_label = largest_label_idx + 1
-        hotspot_mask = (labels == largest_label)
-        hotspot_area = np.sum(hotspot_mask)
-        if hotspot_area == 0: print("Warning: Largest component mask (hotspot) empty.")
-    # else: print("Warning: No connected components in thresholded activity map.") # Reduce noise
-
-    return hotspot_mask, hotspot_area
-
-# --- Temporal Feature Calculations (No change needed, just use correct mask) ---
-def compute_temporal_gradient_in_interval(frames, hotspot_mask, start_frame, end_frame):
-    # (Code remains the same as previous version)
-    intensity_series = []
-    if frames is None or frames.ndim != 3 or frames.shape[2] == 0: return np.nan
-    if hotspot_mask is None or not np.any(hotspot_mask) or hotspot_mask.shape != frames.shape[:2]: return np.nan
-    total_frames = frames.shape[2]
-    actual_start = max(0, start_frame); actual_end = min(total_frames, end_frame)
-    if actual_end - actual_start < 2: return np.nan
-    for fidx in range(actual_start, actual_end):
-        try:
-            frame = frames[:, :, fidx]
-            if frame is None or frame.shape != hotspot_mask.shape: continue
-            masked_pixels = frame[hotspot_mask]
-            if masked_pixels.size == 0: continue
-            avg_intensity = np.mean(masked_pixels)
-            if not np.isfinite(avg_intensity): continue
-            intensity_series.append(avg_intensity)
-        except Exception as e: print(f"Error processing frame {fidx} for hotspot gradient: {e}"); continue
-    if len(intensity_series) < 2: return np.nan
-    mean_abs_gradient = np.mean(np.abs(np.diff(np.array(intensity_series))))
-    return mean_abs_gradient if np.isfinite(mean_abs_gradient) else np.nan
-
-def compute_temporal_std_dev_in_interval(frames, hotspot_mask, start_frame, end_frame):
-    # (Code remains the same as previous version)
-    intensity_series = []
-    if frames is None or frames.ndim != 3 or frames.shape[2] == 0: return np.nan
-    if hotspot_mask is None or not np.any(hotspot_mask) or hotspot_mask.shape != frames.shape[:2]: return np.nan
-    total_frames = frames.shape[2]
-    actual_start = max(0, start_frame); actual_end = min(total_frames, end_frame)
-    if actual_end - actual_start < 2: return np.nan
-    for fidx in range(actual_start, actual_end):
-        try:
-            frame = frames[:, :, fidx]
-            if frame is None or frame.shape != hotspot_mask.shape: continue
-            masked_pixels = frame[hotspot_mask]
-            if masked_pixels.size == 0: continue
-            avg_intensity = np.mean(masked_pixels)
-            if not np.isfinite(avg_intensity): continue
-            intensity_series.append(avg_intensity)
-        except Exception as e: print(f"Error processing frame {fidx} for hotspot std dev: {e}"); continue
-    if len(intensity_series) < 2: return np.nan
-    std_dev = np.std(np.array(intensity_series))
-    return std_dev if np.isfinite(std_dev) else np.nan
-
-
-# --- REVISED: Main extraction function following professor's workflow ---
-def extract_bright_region_features(frames, source_folder_name, mat_filename_no_ext, visualize_index=-1):
-    """
-    Extracts features based on the DYNAMIC hotspot identified from interval-based
-    temporal gradient maps.
-
-    Workflow:
-    1. Calculate gradient map for each time interval.
-    2. Combine interval maps (e.g., by averaging) into a single activity map.
-    3. Extract hotspot mask from the combined activity map.
-    4. Calculate features (area, interval grad/std) using the hotspot mask on original frames.
+    Calculates features based on temperature time series AND activity map statistics
+    within the provided hotspot mask.
 
     Args:
-        frames (np.ndarray): Video frames (H, W, N).
-        source_folder_name (str): Parent directory name of the mat file.
-        mat_filename_no_ext (str): Mat file name without extension.
-        visualize_index (int): Sample index for visualization control.
+        frames (np.ndarray): Full video frames (H, W, N), expected float64.
+        hotspot_mask (np.ndarray): Boolean mask (H, W) for the hotspot.
+        activity_map (np.ndarray): The weighted slope map (H, W) used to generate the mask.
+        fps (float): Frames per second.
+        focus_duration_frames (int): Number of initial frames to analyze for temp features.
 
     Returns:
-        dict: Dictionary of calculated features.
+        dict: Dictionary containing calculated features.
     """
-    # --- Configuration ---
-    interval_frames = getattr(config, 'FRAME_INTERVAL_SIZE', 50)
-    max_intervals = getattr(config, 'MAX_FRAME_INTERVALS', 3)
-    hotspot_quantile = getattr(config, 'GRADIENT_MAP_HOTSPOT_QUANTILE', 0.98) # Quantile for combined map
-    calculate_std = getattr(config, 'CALCULATE_STD_FEATURES', False)
-    save_vis = getattr(config, 'SAVE_FOCUS_AREA_VISUALIZATION', False)
-    num_to_visualize = getattr(config, 'NUM_SAMPLES_TO_VISUALIZE', 0)
-    base_vis_save_dir = getattr(config, 'FOCUS_AREA_VIS_SAVE_DIR', None)
-    vis_orig_colormap = getattr(config, 'VISUALIZATION_COLORMAP', cv2.COLORMAP_HOT)
-    vis_grad_colormap = getattr(config, 'VISUALIZATION_GRADIENT_MAP_COLORMAP', cv2.COLORMAP_INFERNO)
+    features = {
+        'hotspot_area': np.nan,
+        'hotspot_temp_change_rate': np.nan,      # Avg Temp Slope
+        'hotspot_temp_change_magnitude': np.nan, # Avg Temp Change Magnitude
+        # --- New Activity Features ---
+        'activity_mean': np.nan,
+        'activity_median': np.nan,
+        'activity_std': np.nan,
+        'activity_max': np.nan,
+        'activity_sum': np.nan,
+    }
 
+    # Basic validation
+    if frames is None or frames.ndim != 3: return features # Return NaNs
+    if hotspot_mask is None or hotspot_mask.ndim != 2 or hotspot_mask.dtype != bool: return features
+    if activity_map is None or activity_map.ndim != 2: return features
+    if hotspot_mask.shape != frames.shape[:2] or activity_map.shape != frames.shape[:2]: return features
 
-    print(f"Extracting DYNAMIC features for: Folder='{source_folder_name}', File='{mat_filename_no_ext}.mat'")
-    features = {}; area_feat_name = "hotspot_area"; features[area_feat_name] = np.nan
+    # --- 1. Area ---
+    features['hotspot_area'] = np.sum(hotspot_mask)
+    if features['hotspot_area'] == 0:
+        print("Warning: Hotspot mask has zero area.")
+        return features # Return NaNs
 
-    if frames is None or frames.ndim != 3 or frames.shape[2] < 2:
-        print("Warning: Invalid/insufficient frames."); return features
-    num_frames = frames.shape[2]
+    # --- 2. Temperature Time Series Features ---
+    actual_focus_frames = min(focus_duration_frames, frames.shape[2])
+    if actual_focus_frames >= 2:
+        frames_focus = frames[:, :, :actual_focus_frames]
+        hotspot_avg_temp_list = []
+        for t in range(actual_focus_frames):
+            masked_pixels = frames_focus[hotspot_mask, t]
+            if masked_pixels.size > 0:
+                avg_temp_t = np.mean(masked_pixels[np.isfinite(masked_pixels)])
+                hotspot_avg_temp_list.append(avg_temp_t if np.isfinite(avg_temp_t) else np.nan)
+            else: hotspot_avg_temp_list.append(np.nan)
 
-    # --- Step 1: Calculate Interval Gradient Maps ---
-    interval_gradient_maps = []
-    print("  Calculating interval gradient maps...")
-    for i in range(max_intervals):
-        start_frame = i * interval_frames
-        # Ensure start frame is valid, break if we request intervals beyond available frames
-        if start_frame >= num_frames -1: # Need at least 2 frames starting from start_frame
-             print(f"  Skipping interval {i} ({start_frame}-...) as it starts too late.")
-             break
-        end_frame = start_frame + interval_frames
-        # No need to cap end_frame here, compute_interval_gradient_map handles it
-        interval_map = compute_interval_gradient_map(frames, start_frame, end_frame)
-        if interval_map is not None:
-            interval_gradient_maps.append(interval_map)
+        hotspot_avg_temp_series = np.array(hotspot_avg_temp_list)
+        valid_temps_mask = np.isfinite(hotspot_avg_temp_series)
+        num_valid_points = np.sum(valid_temps_mask)
+
+        if num_valid_points >= 2:
+            time_vector = (np.arange(actual_focus_frames) / fps).astype(np.float64)
+            valid_times = time_vector[valid_temps_mask]
+            valid_temps = hotspot_avg_temp_series[valid_temps_mask]
+
+            # a) Avg Rate (Slope)
+            try:
+                slope, intercept, r_val, p_val, std_err = linregress(valid_times, valid_temps)
+                if np.isfinite(slope): features['hotspot_temp_change_rate'] = slope
+            except ValueError: pass # Keep NaN
+            except Exception as e_lr: print(f"Warning: Error in temp rate linregress: {e_lr}")
+
+            # b) Magnitude
+            features['hotspot_temp_change_magnitude'] = valid_temps[-1] - valid_temps[0]
         else:
-            print(f"  Warning: Failed to calculate gradient map for interval {i} ({start_frame}-{end_frame}).")
-            # Optionally append None or just skip
+            print("Warning: Less than 2 valid avg temp points for rate/mag calc.")
+    else:
+        print("Warning: Less than 2 focus frames for rate/mag calc.")
 
-    if not interval_gradient_maps:
-        print("Error: Failed to calculate ANY interval gradient maps.")
-        return features # Return dict with only area=NaN
 
-    # --- Step 2: Combine Gradient Maps ---
-    # Combine by averaging the valid interval maps
-    print(f"  Combining {len(interval_gradient_maps)} interval gradient map(s)...")
-    # Use np.stack then np.mean, handling potential NaNs if needed
+    # --- 3. Activity Map Features ---
     try:
-         # Stack valid maps, mean along the new axis (axis=0)
-         combined_activity_map = np.mean(np.stack(interval_gradient_maps, axis=0), axis=0)
-    except ValueError as e: # Handles case where interval maps might have different shapes (shouldn't happen) or empty list
-         print(f"Error combining interval maps: {e}. Cannot proceed.")
-         return features
+        # Extract activity values ONLY from within the mask
+        activity_values_in_mask = activity_map[hotspot_mask]
+        # Filter out potential NaNs/Infs from activity map itself
+        valid_activity_values = activity_values_in_mask[np.isfinite(activity_values_in_mask)]
 
-    # --- Step 3: Extract Hotspot from Combined Map ---
-    print(f"  Extracting hotspot from combined activity map using quantile {hotspot_quantile}...")
-    hotspot_mask, hotspot_area = extract_hotspot_from_map(combined_activity_map, threshold_quantile=hotspot_quantile)
-    features[area_feat_name] = hotspot_area # Store the dynamic hotspot area
+        if valid_activity_values.size > 0:
+            features['activity_mean'] = np.mean(valid_activity_values)
+            features['activity_median'] = np.median(valid_activity_values)
+            features['activity_std'] = np.std(valid_activity_values)
+            features['activity_max'] = np.max(valid_activity_values)
+            features['activity_sum'] = np.sum(valid_activity_values)
+        else:
+            print("Warning: No valid finite activity values found within the hotspot mask.")
 
-    if hotspot_mask is None or not np.any(hotspot_mask):
-        print("Warning: Dynamic hotspot extraction failed or resulted in empty mask.")
-        # Keep the area feature (might be 0), return before calculating temporal features
-        return features
+    except Exception as e:
+        print(f"Error calculating activity map features: {e}")
+        # Features remain NaN
 
-    # --- Optional Visualization ---
-    if save_vis and visualize_index >= 0 and visualize_index < num_to_visualize and base_vis_save_dir:
-        if frames.shape[2] > 0:
-             mean_frame_for_vis = compute_mean_frame(frames)
-             final_vis_dir = os.path.join(base_vis_save_dir, source_folder_name, mat_filename_no_ext)
-             save_dynamic_hotspot_visualizations( # Call the updated vis function
-                 original_frame=frames[:, :, 0],
-                 mean_frame=mean_frame_for_vis,
-                 interval_gradient_maps=interval_gradient_maps, # Pass the list
-                 combined_gradient_map=combined_activity_map,   # Pass the combined map
-                 hotspot_mask=hotspot_mask,                    # Pass the final mask
-                 index=visualize_index,
-                 save_dir=final_vis_dir,
-                 orig_colormap=vis_orig_colormap,
-                 grad_colormap=vis_grad_colormap
-             )
-        else: print("Warning: Cannot visualize, no frames available.")
-
-    # --- Step 4: Extract Interval Features using Hotspot Mask ---
-    print("  Extracting interval features within dynamic hotspot...")
-    for i in range(max_intervals):
-         start_frame = i * interval_frames
-         if start_frame >= num_frames -1: break # Don't calculate for intervals that don't exist
-         end_frame = start_frame + interval_frames
-         # Use "hotspot_" prefix for clarity
-         grad_feat_name = f"hotspot_grad_{start_frame}_{end_frame}"
-         std_feat_name = f"hotspot_std_{start_frame}_{end_frame}"
-
-         # Calculate gradient using the final hotspot mask
-         mean_abs_grad = compute_temporal_gradient_in_interval(frames, hotspot_mask, start_frame, end_frame)
-         features[grad_feat_name] = mean_abs_grad
-
-         # Calculate std dev using the final hotspot mask (conditionally)
-         if calculate_std:
-             std_dev = compute_temporal_std_dev_in_interval(frames, hotspot_mask, start_frame, end_frame)
-             features[std_feat_name] = std_dev
-
-    print(f"  Finished extracting dynamic features. Keys: {list(features.keys())}")
     return features
+
+
+# --- Main Feature Extraction Function (Modified) ---
+def extract_features_with_mask(
+    frames_or_path,
+    mask_path,
+    # Pass necessary parameters for recalculating activity map
+    fps,
+    focus_duration_sec,
+    smooth_window,
+    envir_para,
+    errorweight,
+    augment,
+    fuselevel, # Added
+    normalizeT, # Added
+    roi_border_percent=None, # Added
+    # Other args
+    source_folder_name="Unknown",
+    mat_filename_no_ext="Unknown"
+    ):
+    """
+    Loads frames and mask, recalculates activity map, extracts features.
+    """
+    print(f"Extracting features for: {mat_filename_no_ext}.mat using mask: {os.path.basename(mask_path)}")
+    print(f"  Recalculating activity map (Slope, Focus: {focus_duration_sec}s, Smooth: {smooth_window}, Fuse: {fuselevel}, NormT: {normalizeT}, ROI: {roi_border_percent is not None})")
+
+    # --- 1. Load Mask ---
+    if not os.path.exists(mask_path): print(f"Error: Mask file not found: {mask_path}"); return None
+    try:
+        hotspot_mask = np.load(mask_path); assert hotspot_mask.dtype == bool
+    except Exception as e: print(f"Error loading mask file {mask_path}: {e}"); return None
+
+    # --- 2. Load Frames ---
+    if isinstance(frames_or_path, str):
+        if not os.path.exists(frames_or_path): print(f"Error: Mat file not found: {frames_or_path}"); return None
+        try:
+            mat_data = scipy.io.loadmat(frames_or_path); frames_raw = mat_data.get(config.MAT_FRAMES_KEY, None)
+            if frames_raw is None: raise KeyError(f"Key '{config.MAT_FRAMES_KEY}' not found.")
+            frames_raw = frames_raw.astype(np.float64)
+        except Exception as e: print(f"Error loading frames from {frames_or_path}: {e}"); return None
+    elif isinstance(frames_or_path, np.ndarray): frames_raw = frames_or_path.astype(np.float64)
+    else: print("Error: Invalid frames_or_path argument."); return None
+
+    if frames_raw.ndim != 3 or frames_raw.shape[2] < 2: print("Error: Invalid frame dimensions."); return None
+    if frames_raw.shape[:2] != hotspot_mask.shape: print("Error: Frame shape mismatch mask shape."); return None
+    H, W, num_frames = frames_raw.shape
+
+    # --- 3. Recalculate Activity Map (using same parameters as mask generation) ---
+    # a) Pre-processing
+    frames_proc = apply_preprocessing(frames_raw, normalizeT, fuselevel)
+    # b) Focus Window
+    focus_duration_frames = int(focus_duration_sec * fps)
+    focus_duration_frames = max(2, min(focus_duration_frames, num_frames))
+    frames_focus = frames_proc[:, :, :focus_duration_frames]
+    # c) ROI Mask (optional)
+    roi_mask = None
+    if roi_border_percent is not None:
+        border_h_roi = int(H * roi_border_percent); border_w_roi = int(W * roi_border_percent)
+        roi_mask = np.zeros((H, W), dtype=bool); roi_mask[border_h_roi:-border_h_roi, border_w_roi:-border_w_roi] = True
+    # d) Calculate Weighted Slope Map
+    activity_map = calculate_weighted_slope_activity_map(
+        frames_focus, fps, smooth_window, envir_para, errorweight, augment, roi_mask
+    )
+    if activity_map is None:
+        print("  Error: Failed to recalculate activity map during feature extraction.")
+        return None # Cannot calculate activity features
+
+    # --- 4. Calculate All Features ---
+    # Use focus_duration_frames consistent with activity map calculation
+    extracted_features = calculate_features_from_mask_and_activity(
+        frames_proc, # Use pre-processed frames for consistency if normalizeT/fuselevel applied
+        hotspot_mask,
+        activity_map,
+        fps,
+        focus_duration_frames
+    )
+
+    if extracted_features is None: print("  Feature calculation failed."); return None # Should not happen if area > 0
+
+    print(f"  Finished extracting features. Keys: {list(extracted_features.keys())}")
+    return extracted_features
+
 
 # --- END OF FILE feature_engineering.py ---
