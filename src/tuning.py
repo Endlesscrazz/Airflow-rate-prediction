@@ -22,13 +22,13 @@ import traceback
 param_grid_svr = {
     'model__C': [0.1, 1, 10, 50], # Regularization parameter
     'model__epsilon': [0.01, 0.1, 0.2], # Epsilon in epsilon-SVR
-    'model__kernel': ['rbf', 'linear'] # Kernel type
+    'model__kernel': ['rbf',] # Kernel type
     # 'model__gamma': ['scale', 'auto'] # Only for 'rbf', 'poly', 'sigmoid'
 }
 
 # MLP Regressor parameter grid (Refined based on simplified architecture)
 param_grid_mlp = {
-    'model__hidden_layer_sizes': [(10,), (10, 5), (15, 5), (15,)], # Try different depths/widths
+    'model__hidden_layer_sizes': [(10,), (30, 15), (15, 5), (20,10,5)], # Try different depths/widths
     'model__activation': ['relu', 'tanh'],
     'model__solver': ['adam'], # Adam is generally good
     'model__alpha': [0.001, 0.01, 0.5], # Regularization strength
