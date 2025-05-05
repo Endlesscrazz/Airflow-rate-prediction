@@ -11,6 +11,7 @@ mat_data = scipy.io.loadmat(file_path)
 # Check the keys in the loaded dictionary to get an idea of the data structure
 print("Keys in the MAT file:", mat_data.keys())
 
+
 # Filter out the metadata keys (__header__, __version__, __globals__)
 data_keys = [key for key in mat_data.keys() if not key.startswith('__')]
 

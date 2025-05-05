@@ -310,7 +310,7 @@ if __name__ == "__main__":
     # Pre-processing
     parser.add_argument("--normalizeT", type=int, default=0, choices=[0, 1], help="Normalize temperature per frame? (0=No, 1=Yes).")
     parser.add_argument("--fuselevel", type=int, default=0, help="Spatial fuse level (box filter radius, 0=None).")
-    parser.add_argument("--smooth_window", type=int, default=1, help="Temporal smoothing window size (moving avg before slope fit).")
+    parser.add_argument("--smooth_window", type=int, default=3, help="Temporal smoothing window size (moving avg before slope fit).")
 
     # Slope Weighting Parameters
     parser.add_argument("--envir_para", type=int, default=-1, choices=[-1, 1], help="Environment parameter (-1=Winter, 1=Summer).")
