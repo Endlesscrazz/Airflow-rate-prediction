@@ -8,7 +8,7 @@ from sklearn.impute import SimpleImputer
 
 # --- Import Regressors ---
 from sklearn.neural_network import MLPRegressor
-from sklearn.linear_model import LinearRegression # Added
+from sklearn.linear_model import Lasso,Ridge # Added
 from sklearn.svm import SVR                     # Added
 # Removed other imports if they existed
 
@@ -19,6 +19,9 @@ def get_regressors():
 
     # a) Linear Regression (Simple Baseline)
     #regressors["LinearRegression"] = LinearRegression()
+   #regressors["Lasso"] = Lasso()
+
+    regressors["Ridge"] = Ridge()
 
     # b) Support Vector Regression (Handles non-linearity)
     # Default parameters are often a good starting point, tune C and epsilon later
