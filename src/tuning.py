@@ -18,12 +18,22 @@ import traceback
 # (Tuning often involves feature selection/regularization handled differently)
 # param_grid_lr = {} # Empty grid
 
+# param_grid_lasso = {
+#     'model__alpha': [0.0001, 0.001, 0.01, 0.1, 1, 10],  # Regularization strength
+#     'model__max_iter': [1000, 5000, 10000]              # Just in case convergence is an issue
+# }
+
+param_grid_ridge = {
+    'model__alpha': [0.0001, 0.001, 0.01, 0.1, 1, 10, 100],  # Regularization strength
+    'model__solver': ['auto', 'svd', 'cholesky', 'lsqr', 'sparse_cg', 'sag']  # Optional: solver options
+}
+
 # SVR parameter grid (EXAMPLE - C, epsilon, kernel are common)
 param_grid_svr = {
     'model__C': [0.1, 1, 10, 50], # Regularization parameter
-    'model__epsilon': [0.01, 0.1, 0.2], # Epsilon in epsilon-SVR
-    'model__kernel': ['rbf',] # Kernel type
-    # 'model__gamma': ['scale', 'auto'] # Only for 'rbf', 'poly', 'sigmoid'
+    'model__epsilon': [0.005, 0.01, 0.1, 0.2], # Epsilon in epsilon-SVR
+    'model__kernel': ['rbf'],# Kernel type
+    'model__gamma': ['scale', 'auto'] # Only for 'rbf', 'poly', 'sigmoid'
 }
 
 # MLP Regressor parameter grid (Refined based on simplified architecture)
@@ -41,7 +51,9 @@ param_grid_mlp = {
 param_grids = {
     # "LinearRegression": param_grid_lr, # Exclude LR from grid search
     "SVR": param_grid_svr,
-    "MLPRegressor": param_grid_mlp
+    "MLPRegressor": param_grid_mlp,
+    #"Lasso": param_grid_lasso,
+    "Ridge": param_grid_ridge
 }
 
 # --- Tuning Function ---

@@ -505,6 +505,7 @@ if __name__ == "__main__":
         description="Visualize dynamic focus area using slope or interval gradients within an initial time window.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
+    # temp_2025-2-27-18-44-39_21.7_30_8.3__frame0_overlay.png
     # Input / Output
     parser.add_argument("mat_file", help="Path to the input .mat file.")
     parser.add_argument("output_dir", help="Path to the BASE output directory.")
@@ -512,7 +513,7 @@ if __name__ == "__main__":
     parser.add_argument("--fps", type=float, default=5.0, help="Frames per second of the original recording (used for time calculations).")
 
     # Focus Window & Strategy
-    parser.add_argument("--focus_duration_sec", type=float, default=5.0,
+    parser.add_argument("--focus_duration_sec", type=float, default=10.0,
                         help="Duration (in seconds) from the start of the video to use for generating the activity map.")
     parser.add_argument("--cm", "--combination_strategy", default="slope", choices=['mean', 'max', 'first_interval', 'slope'], dest='combination_strategy',
                         help="Strategy for activity map generation.")
@@ -524,7 +525,7 @@ if __name__ == "__main__":
                         help="Normalize temperature per frame? (0=No, 1=Yes).")
     parser.add_argument("--fuselevel", type=int, default=0,
                         help="Spatial fuse level (box filter radius before analysis, 0=None).")
-    parser.add_argument("--smooth_window", type=int, default=3,
+    parser.add_argument("--smooth_window", type=int, default=1,
                         help="Temporal smoothing window size (moving average before slope fit, use odd number >= 1). Only used if --cm is 'slope'.")
 
     # Hotspot Extraction Parameters
