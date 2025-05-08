@@ -4,6 +4,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns # Using seaborn for nicer plots
+import os
 
 def plot_actual_vs_predicted(y_true, y_pred, title="Actual vs. Predicted", save_path=None):
     """
@@ -41,5 +42,21 @@ def plot_actual_vs_predicted(y_true, y_pred, title="Actual vs. Predicted", save_
         print(f"Saving plot to: {save_path}")
         plt.savefig(save_path, dpi=300)
         plt.close() # Close plot window if saving
+    else:
+        plt.show()
+
+def plot_loss_curve(loss_curve, title, save_dir, filename="mlp_loss_curve.png"):
+    plt.figure(figsize=(10, 5))
+    plt.plot(loss_curve)
+    plt.title(title)
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.grid(True)
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, filename)
+        plt.savefig(save_path, dpi=150)
+        print(f"MLP loss curve saved to: {save_path}")
+        plt.close()
     else:
         plt.show()
