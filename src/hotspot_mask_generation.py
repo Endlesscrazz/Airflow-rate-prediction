@@ -1,10 +1,7 @@
 # hotspot_mask_generation.py
 """
 Pre-processing script to generate and save hotspot masks for thermal .mat files.
-
-Iterates through dataset, applies localization based on focused,
-DIRECTION-FILTERED and STATISTICALLY-FILTERED (p-value) linear slope analysis,
-and saves boolean masks. Optionally applies ROI. SLOWER due to pixel loop.
+Uses parameters from config.py as defaults, which can be overridden by CLI args.
 """
 
 import numpy as np
@@ -13,33 +10,33 @@ import os
 import scipy.io
 import argparse
 import sys
-import traceback
 from scipy import stats as sp_stats
 from tqdm import tqdm
 import fnmatch
+import matplotlib.pyplot as plt # For saving debug activity map
 
 # --- Import from data_utils and config ---
 try:
-    import data_utils
+    import data_utils # Not strictly used in this script but good practice if it becomes needed
     import config
 except ImportError:
     print("Error: Failed to import data_utils.py or config.py.")
+    print("Please ensure these files are in the same directory or accessible in PYTHONPATH.")
     sys.exit(1)
 
 # --- Helper Functions ---
 def apply_preprocessing(frames, normalizeT, fuselevel):
-    # (Keep function as before)
     frames_proc = frames.copy()
     if normalizeT:
         frame_means = np.mean(frames_proc, axis=(0, 1), keepdims=True)
-        frame_means[frame_means == 0] = 1.0
-        frames_proc /= frame_means
+        frame_means[frame_means == 0] = 1e-9 # Avoid division by zero
+        frames_proc = frames_proc / frame_means
     if fuselevel > 0:
         kernel_size = 2 * fuselevel + 1
         try:
-            num_frames = frames_proc.shape[2]
+            num_f = frames_proc.shape[2]
             frames_fused = np.zeros_like(frames_proc)
-            for i in range(num_frames):
+            for i in range(num_f):
                 frames_fused[:, :, i] = cv2.boxFilter(
                     frames_proc[:, :, i], -1, (kernel_size, kernel_size))
             frames_proc = frames_fused
@@ -50,378 +47,418 @@ def apply_preprocessing(frames, normalizeT, fuselevel):
 # --- Activity Map Calculation with P-value Filter ---
 def calculate_filtered_slope_activity_map(frames_focus, fps, smooth_window,
                                           envir_para, augment, p_value_threshold,
-                                          roi_mask=None):  # roi_mask is for iteration bounds
-    """
-    Calculates activity map based on direction-filtered AND p-value filtered slope magnitude.
-    Uses pixel-wise loop for linregress to get p-value. Slower.
-    """
+                                          roi_mask=None):
     H, W, T_focus = frames_focus.shape
     final_activity_map = np.zeros((H, W), dtype=np.float64)
-
-    if smooth_window > 1:
-        frames_focus_smoothed = np.zeros_like(frames_focus)
-        for r in range(H):
-            for c in range(W):
-                smoothed_series = np.convolve(frames_focus[r, c, :], np.ones(
-                    smooth_window)/smooth_window, mode='valid')
-                pad_len_before = (T_focus - len(smoothed_series)) // 2
-                pad_len_after = T_focus - len(smoothed_series) - pad_len_before
-                if len(smoothed_series) > 0:
-                    frames_focus_smoothed[r, c, :] = np.pad(
-                        smoothed_series, (pad_len_before, pad_len_after), mode='edge')
-                else:
-                    frames_focus_smoothed[r, c, :] = np.nan
-        t_smoothed = (np.arange(T_focus) / fps).astype(np.float64)
-    else:
-        frames_focus_smoothed = frames_focus
-        t_smoothed = (np.arange(T_focus) / fps).astype(np.float64)
+    passed_filter_count = 0
 
     if T_focus < 2:
-        print("Error: Less than 2 time points.")
-        return None
+        print("  Error in slope calc: Less than 2 time points.")
+        return final_activity_map, 0 # Return empty map and count
 
+    t_base = (np.arange(T_focus) / fps).astype(np.float64)
+    frames_for_slope = frames_focus.copy() # Work on a copy
+
+    if smooth_window > 1 and T_focus >= smooth_window:
+        frames_smoothed_temp = np.zeros_like(frames_for_slope)
+        for r_idx in range(H):
+            for c_idx in range(W):
+                smoothed_series = np.convolve(frames_for_slope[r_idx, c_idx, :],
+                                            np.ones(smooth_window)/smooth_window, mode='valid')
+                pad_len_before = (T_focus - len(smoothed_series)) // 2
+                pad_len_after = T_focus - len(smoothed_series) - pad_len_before
+                frames_smoothed_temp[r_idx, c_idx, :] = np.pad(
+                    smoothed_series, (pad_len_before, pad_len_after), mode='edge')
+        frames_for_slope = frames_smoothed_temp
+    
     # Determine iteration indices
-    if roi_mask is not None:
-        roi_indices = np.argwhere(roi_mask)
-        iterator = tqdm(range(
-            roi_indices.shape[0]), desc="Calculating Filtered Slope (ROI)", leave=False, ncols=80)
-
-        def get_coords(idx): return roi_indices[idx]
+    pixel_iterator_indices = []
+    if roi_mask is not None and roi_mask.dtype == bool and roi_mask.shape == (H,W) and np.any(roi_mask):
+        pixel_iterator_indices = np.argwhere(roi_mask) # List of (r,c) tuples
+        desc = "Calculating Slope (ROI)"
     else:
-        total_pixels = H * W
-        iterator = tqdm(range(
-            total_pixels), desc="Calculating Filtered Slope (Full)", leave=False, ncols=80)
+        pixel_iterator_indices = [(r, c) for r in range(H) for c in range(W)] # List of all (r,c)
+        desc = "Calculating Slope (Full Frame)"
 
-        def get_coords(idx): return np.unravel_index(idx, (H, W))
-
-    for idx in iterator:
-        r, c = get_coords(idx)
-        y = frames_focus_smoothed[r, c, :]
-        valid_mask_y = np.isfinite(y)
-        y_valid = y[valid_mask_y]
-        t_valid = t_smoothed[valid_mask_y]
+    for r, c in tqdm(pixel_iterator_indices, desc=desc, leave=False, ncols=100):
+        y_pixel_series = frames_for_slope[r, c, :]
+        valid_mask_y = np.isfinite(y_pixel_series)
+        y_valid = y_pixel_series[valid_mask_y]
+        t_valid = t_base[valid_mask_y]
 
         if len(y_valid) < 2:
             continue
         try:
             res = sp_stats.linregress(t_valid, y_valid)
-            passes_filter = False
             if np.isfinite(res.slope) and np.isfinite(res.pvalue):
-                if res.slope * envir_para < 0 and res.pvalue < p_value_threshold:
-                    passes_filter = True
-            if passes_filter:
-                activity_value = np.abs(res.slope)
-                if augment != 1.0:
-                    activity_value = np.power(activity_value, augment)
-                final_activity_map[r, c] = activity_value
+                if (res.slope * envir_para > 0) and (res.pvalue < p_value_threshold):
+                    activity_value = np.abs(res.slope)
+                    final_activity_map[r, c] = np.power(
+                        activity_value, augment) if augment != 1.0 else activity_value
+                    passed_filter_count +=1
         except ValueError:
-            pass
+            pass # Raised by linregress for bad inputs
         except Exception as e_lr:
-            print(f"\nWarn: linregress/filter failed at ({r},{c}): {e_lr}")
+            # This should be rare if input data is clean
+            print(f"\n  Warning: linregress/filter failed at ({r},{c}): {e_lr}")
             pass
-    return final_activity_map
+    return final_activity_map, passed_filter_count
 
-
+# --- Extract Hotspot from Activity Map ---
 def extract_hotspot_from_map(activity_map, threshold_quantile=0.95, morphology_op='close',
                              apply_blur=False, blur_kernel_size=(3, 3),
-                             roi_mask=None):
+                             roi_mask=None): # roi_mask here is for processing the activity_map
     if activity_map is None or activity_map.size == 0:
-        return None, np.nan
+        print("Warning: Activity map is None or empty in extract_hotspot_from_map.")
+        return np.array([]), 0.0
+
+    map_to_process = activity_map.copy()
     if roi_mask is not None:
-        if roi_mask.shape != activity_map.shape:
-            print("Warning: ROI mask shape mismatch.")
-            map_to_process = activity_map.copy()
-        else:
-            map_to_process = activity_map.copy()
+        if roi_mask.shape == activity_map.shape:
+            if roi_mask.dtype != bool:
+                roi_mask = roi_mask.astype(bool)
             map_to_process[~roi_mask] = np.nan
-    else:
-        map_to_process = activity_map.copy()
+        else:
+            print("Warning: ROI mask shape mismatch in extract_hotspot. Ignoring ROI for extraction.")
+
     if apply_blur:
         if np.all(np.isnan(map_to_process)):
-            print("Warning: map all NaN after ROI, skipping blur.")
+            print("Warning: Activity map is all NaN after ROI application, skipping blur.")
         else:
             try:
+                map_for_blur_no_nan = np.nan_to_num(map_to_process.astype(np.float32), nan=0.0)
                 k_h = blur_kernel_size[0] + (1 - blur_kernel_size[0] % 2)
                 k_w = blur_kernel_size[1] + (1 - blur_kernel_size[1] % 2)
-                map_to_process = cv2.GaussianBlur(
-                    map_to_process, (k_w, k_h), 0)
+                blurred_map = cv2.GaussianBlur(map_for_blur_no_nan, (k_w, k_h), 0)
+                if roi_mask is not None and roi_mask.shape == map_to_process.shape:
+                    blurred_map[~roi_mask] = np.nan
+                map_to_process = blurred_map
             except Exception as e:
-                print(f"Warning: GaussianBlur failed: {e}.")
-    proc_map = map_to_process
-    nan_mask = np.isnan(proc_map)
+                print(f"Warning: GaussianBlur failed: {e}. Using unblurred map (post-ROI).")
+
+    # --- Find the pixel with the maximum activity in the (potentially ROI'd and blurred) map ---
+    # This will be our anchor point.
+    max_activity_coords = None
+    if not np.all(np.isnan(map_to_process)):
+        try:
+            # nanargmax finds the index of the max value, ignoring NaNs.
+            max_activity_flat_idx = np.nanargmax(map_to_process)
+            max_activity_coords = np.unravel_index(max_activity_flat_idx, map_to_process.shape)
+            #print(f"  Debug: Max activity in map_to_process at {max_activity_coords} with value {map_to_process[max_activity_coords]:.4e}")
+        except ValueError: # nanargmax raises error if all are NaN
+             print("  Debug: All values in map_to_process are NaN before nanargmax.")
+    else:
+        print("  Debug: map_to_process is all NaN before finding max activity.")
+
+
+    non_nan_pixels_before_thresh = map_to_process[~np.isnan(map_to_process)]
+    if non_nan_pixels_before_thresh.size > 0:
+        min_act = np.min(non_nan_pixels_before_thresh)
+        max_act = np.max(non_nan_pixels_before_thresh)
+        non_zero_count = np.sum(non_nan_pixels_before_thresh > 1e-9)
+        #print(f"Debug: Activity map before thresholding - Min: {min_act:.2e}, Max: {max_act:.2e}, Non-zero count: {non_zero_count}")
+    else:
+        print("Debug: Activity map before thresholding is all NaN or empty.")
+
+    nan_mask = np.isnan(map_to_process)
     if np.all(nan_mask):
-        print("Warning: Activity map all NaNs after ROI/blur.")
-        return None, np.nan
-
-    valid_pixels = proc_map[~nan_mask]
-    if valid_pixels.size == 0:
-        print("Warning: No valid pixels found.")
+        print("Warning: Activity map all NaNs after ROI/blur in extract_hotspot_from_map.")
         return np.zeros_like(activity_map, dtype=bool), 0.0
 
-    map_std = np.std(valid_pixels)
-    map_max = np.max(valid_pixels)
-    if map_max < 1e-9 or map_std < 1e-9:
+    valid_pixels_for_threshold = map_to_process[~nan_mask]
+    if valid_pixels_for_threshold.size == 0:
+        print("Warning: No valid pixels found in activity map for thresholding.")
         return np.zeros_like(activity_map, dtype=bool), 0.0
+
+    map_std_val = np.std(valid_pixels_for_threshold)
+    map_max_val = np.max(valid_pixels_for_threshold)
+
+    if map_max_val < 1e-9 or (map_std_val < 1e-9 and valid_pixels_for_threshold.size > 1):
+        print("Warning: Max activity is near zero or no variation in activity map.")
+        return np.zeros_like(activity_map, dtype=bool), 0.0
+    
     try:
-        threshold_value = np.percentile(valid_pixels, threshold_quantile * 100)
+        threshold_value = np.percentile(valid_pixels_for_threshold, threshold_quantile * 100)
     except IndexError:
-        threshold_value = map_max
+        threshold_value = map_max_val
+    
+    print(f"  Threshold value for activity map: {threshold_value:.4e} (Quantile: {threshold_quantile*100}%)")
 
-    if threshold_value <= 1e-9 and map_max > 1e-9:
-        threshold_value = 1e-9
+    if threshold_value <= 1e-9 and map_max_val > 1e-9:
+        threshold_value = min(1e-9, map_max_val / 2.0)
 
-    binary_mask = (np.nan_to_num(proc_map, nan=-np.inf)
-                   >= threshold_value).astype(np.uint8)
+    binary_mask = (np.nan_to_num(map_to_process, nan=-np.inf) >= threshold_value).astype(np.uint8)
+
     if not np.any(binary_mask):
+        print("Warning: No pixels passed the activity threshold. Empty binary mask.")
         return np.zeros_like(activity_map, dtype=bool), 0.0
 
     mask_processed = binary_mask.copy()
-    kernel_size_dim = max(
-        min(3, activity_map.shape[0]//20, activity_map.shape[1]//20), 1)
-    kernel_close = np.ones((kernel_size_dim, kernel_size_dim), np.uint8)
-    kernel_open = np.ones((2, 2), np.uint8)
+    kernel_size_dim_close = max(min(3, activity_map.shape[0]//20, activity_map.shape[1]//20), 1)
+    kernel_close = np.ones((kernel_size_dim_close, kernel_size_dim_close), np.uint8)
+    kernel_size_dim_open = max(min(2, activity_map.shape[0]//30, activity_map.shape[1]//30), 1)
+    kernel_open = np.ones((kernel_size_dim_open, kernel_size_dim_open), np.uint8)
+
     try:
         if morphology_op == 'close':
-            mask_processed = cv2.morphologyEx(
-                binary_mask, cv2.MORPH_CLOSE, kernel_close)
+            mask_processed = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel_close)
         elif morphology_op == 'open_close':
-            mask_opened = cv2.morphologyEx(
-                binary_mask, cv2.MORPH_OPEN, kernel_open)
-            mask_processed = cv2.morphologyEx(
-                mask_opened, cv2.MORPH_CLOSE, kernel_close)
+            mask_opened = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel_open)
+            mask_processed = cv2.morphologyEx(mask_opened, cv2.MORPH_CLOSE, kernel_close)
         elif morphology_op != 'none':
-            print(
-                f"Warning: Unknown morph_op '{morphology_op}'. Using 'none'.")
+            print(f"Warning: Unknown morph_op '{morphology_op}'. Using 'none'.")
     except cv2.error as e:
         print(f"Warning: Morphology error: {e}. Using raw binary mask.")
         mask_processed = binary_mask
+
     try:
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-            mask_processed, connectivity=8)
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_processed, connectivity=8)
     except cv2.error as e:
-        print(f"Error in connectedComponents: {e}.")
-        return None, np.nan
+        print(f"Error in connectedComponentsWithStats: {e}. Returning empty mask.")
+        return np.zeros_like(activity_map, dtype=bool), 0.0
 
-    hotspot_mask = np.zeros_like(activity_map, dtype=bool)
+    hotspot_mask_final = np.zeros_like(activity_map, dtype=bool)
     hotspot_area = 0.0
-    if num_labels > 1 and stats.shape[0] > 1:
-        foreground_stats = stats[1:]
-        if foreground_stats.size > 0:
-            largest_label_idx = np.argmax(
-                foreground_stats[:, cv2.CC_STAT_AREA])
-            largest_label = largest_label_idx + 1
-            hotspot_mask = (labels == largest_label)
-            hotspot_area = np.sum(hotspot_mask)
-    return hotspot_mask, hotspot_area
 
-# --- Main Processing Function ---
-def generate_masks_for_dataset(dataset_root_dir, output_base_dir, mat_key, fps, focus_duration_sec,
-                               quantile, morphology_op, apply_blur, blur_kernel_size,
-                               envir_para, augment, smooth_window, p_value_threshold,
-                               fuselevel, normalizeT,
-                               roi_border_percent=None):  # Default to None for optional ROI
-    """Finds .mat files, generates masks using p-value filtered slope, and saves them."""
-    print(f"Starting mask generation process...")
-    print(f"Dataset Root: {dataset_root_dir}")
-    print(f"Mask Output Base: {output_base_dir}")
-    print(f"--- Localization Parameters (Using P-Value Filtered Slope) ---")
-    print(
-        f"  Focus Duration: {focus_duration_sec}s | FPS: {fps} | Smooth: {smooth_window}")
-    print(
-        f"  P-Value Thresh: {p_value_threshold} | Quantile: {quantile:.3f} | Morphology: {morphology_op}")
-    print(
-        f"  Blur: {apply_blur} | Fuse Level: {fuselevel} | NormalizeT: {normalizeT}")
-    print(f"  Envir: {envir_para} | Augment: {augment}")
-    if roi_border_percent is not None:
-        print(f"  ROI Border: {roi_border_percent*100:.0f}%")
+    if num_labels > 1: # Found at least one component beyond background
+        # --- MODIFIED LOGIC: Anchor to max_activity_coords ---
+        if max_activity_coords is not None and labels[max_activity_coords] != 0:
+            # If the max activity pixel is part of a valid component (not background)
+            label_at_max_activity = labels[max_activity_coords]
+            hotspot_mask_final = (labels == label_at_max_activity)
+            hotspot_area = np.sum(hotspot_mask_final)
+            #print(f"  Selected component containing max activity pixel. Label: {label_at_max_activity}, Area: {hotspot_area}")
+        elif stats.shape[0] > 1: # Fallback to largest if max_activity_coords not useful
+            print("  Warning: Max activity pixel not in a valid component or not found. Falling back to largest component.")
+            areas = stats[1:, cv2.CC_STAT_AREA]
+            if areas.size > 0:
+                largest_component_idx = np.argmax(areas)
+                largest_label = largest_component_idx + 1
+                hotspot_mask_final = (labels == largest_label)
+                hotspot_area = np.sum(hotspot_mask_final)
+                print(f"  Fallback: Selected largest component. Label: {largest_label}, Area: {hotspot_area}")
+            else:
+                print("  Warning: No foreground components found after morphology (fallback).")
+        else:
+            print("  Warning: Only background component found by connectedComponentsWithStats (fallback).")
     else:
-        print("  ROI Border: None (slope on full, extraction uses ROI if defined)")
+        print("  Warning: No components found beyond background.")
+        
+    return hotspot_mask_final, hotspot_area
+
+
+# --- Main Orchestration Function ---
+def run_mask_generation_on_dataset(
+    dataset_dir, output_dir, mat_key, fps, focus_sec, smooth_win, p_thresh,
+    envir, augment_s, norm_t, fuse_lvl, roi_perc,
+    act_quant, morph_op, apply_act_blur, blur_kern
+):
+    print(f"--- Mask Generation Run Parameters ---")
+    print(f"  Dataset: {dataset_dir}")
+    print(f"  Output Masks: {output_dir}")
+    print(f"  MAT Key: {mat_key}, FPS: {fps}")
+    print(f"  Slope Calc: Focus={focus_sec}s, SmoothWin={smooth_win}, P-Thresh={p_thresh}, Envir={envir}, Augment={augment_s}")
+    print(f"  Frame Preproc: NormalizeT={norm_t}, FuseLevel={fuse_lvl}")
+    print(f"  ROI Border: {roi_perc*100 if roi_perc is not None else 'None'}%")
+    print(f"  Extraction: Quantile={act_quant:.3f}, MorphOp={morph_op}, BlurActivityMap={apply_act_blur} (Kernel: {blur_kern})")
     print("-" * 30)
 
-    processed_count = 0
-    error_count = 0
+    processed_files_count = 0
+    error_files_count = 0
+    total_mat_files = 0
+    skipped_cooling_folders = 0
 
-    for root, _, files in os.walk(dataset_root_dir):
-        for mat_file in fnmatch.filter(files, '*.mat'):
-            mat_file_path = os.path.join(root, mat_file)
-            relative_path_dir = os.path.relpath(root, dataset_root_dir)
-            print(f"\nProcessing: {os.path.join(relative_path_dir, mat_file)}")
+    for root, dirs, files in os.walk(dataset_dir):
+        if "cooling" in dirs:
+            dirs.remove("cooling") # This prevents os.walk from descending into 'cooling'
+            skipped_cooling_folders +=1
+            print(f"  Skipping 'cooling' subfolder found in: {root}")
 
-            # Load Data
+        mat_files_in_current_dir = fnmatch.filter(files, '*.mat')
+        total_mat_files += len(mat_files_in_current_dir)
+
+        if not mat_files_in_current_dir and "cooling" not in os.path.basename(root).lower(): # Avoid printing for parent of cooling
+            # Only print if it's not a directory that *only* contained 'cooling'
+            parent_dir_name = os.path.basename(root)
+
+        for mat_filename in mat_files_in_current_dir:
+            mat_filepath = os.path.join(root, mat_filename)
+            relative_dir_path = os.path.relpath(root, dataset_dir)
+            if relative_dir_path == ".": relative_dir_path = "" # Handle case where dataset_dir is current dir
+
+            print(f"\nProcessing: {os.path.join(relative_dir_path, mat_filename)}")
+
             try:
-                mat_data = scipy.io.loadmat(mat_file_path)
-                frames_raw = mat_data[mat_key].astype(np.float64)
-                if frames_raw.ndim != 3 or frames_raw.shape[2] < 2:
-                    raise ValueError("Invalid frame data.")
-                H, W, num_frames = frames_raw.shape
+                mat_data = scipy.io.loadmat(mat_filepath)
+                frames_raw_data = mat_data[mat_key].astype(np.float64)
+                if frames_raw_data.ndim != 3 or frames_raw_data.shape[2] < 2:
+                    raise ValueError(f"Invalid frame data shape: {frames_raw_data.shape}")
+                H_img, W_img, num_total_frames_img = frames_raw_data.shape
             except Exception as e:
-                print(f"  Error loading data: {e}. Skip.")
-                error_count += 1
+                print(f"  Error loading data from {mat_filepath}: {e}. Skipping.")
+                error_files_count += 1
                 continue
 
-            # Pre-processing
-            frames_proc = apply_preprocessing(
-                frames_raw, normalizeT, fuselevel)
-            # Focus Window
-            focus_duration_frames = int(focus_duration_sec * fps)
-            focus_duration_frames = max(
-                2, min(focus_duration_frames, num_frames))
-            frames_focus = frames_proc[:, :, :focus_duration_frames]
+            frames_preprocessed = apply_preprocessing(frames_raw_data, norm_t, fuse_lvl)
+            
+            focus_frames_count = max(2, min(int(focus_sec * fps), num_total_frames_img))
+            frames_for_slope_calc = frames_preprocessed[:, :, :focus_frames_count]
 
-            # --- Define ROI Mask ---
-            # If roi_border_percent is None, roi_mask_for_slope_calc will be None.
-            # extract_hotspot_from_map will then use its own internal roi_mask if roi_border_percent is not None.
-            roi_mask_for_slope_calc = None
-            if roi_border_percent is not None:
-                border_h = int(H*roi_border_percent)
-                border_w = int(W*roi_border_percent)
-                roi_mask_for_slope_calc = np.zeros((H, W), dtype=bool)
-                roi_mask_for_slope_calc[border_h:-
-                                        border_h, border_w:-border_w] = True
-
-            # --- Calculate Activity Map (P-Value Filtered Slope) ---
-            activity_map = calculate_filtered_slope_activity_map(
-                frames_focus, fps, smooth_window, envir_para, augment, p_value_threshold, roi_mask_for_slope_calc
+            current_roi_definition_mask = None
+            if roi_perc is not None and 0.0 <= roi_perc < 0.5:
+                border_h_roi = int(H_img * roi_perc)
+                border_w_roi = int(W_img * roi_perc)
+                if H_img - 2 * border_h_roi > 0 and W_img - 2 * border_w_roi > 0:
+                    current_roi_definition_mask = np.zeros((H_img, W_img), dtype=bool)
+                    current_roi_definition_mask[border_h_roi : H_img - border_h_roi, border_w_roi : W_img - border_w_roi] = True
+                else:
+                    print(f"  Warning: ROI border {roi_perc*100:.0f}% too large. Processing full frame.")
+            
+            activity_map_gen, num_passed_slope = calculate_filtered_slope_activity_map(
+                frames_for_slope_calc, fps, smooth_win, envir, augment_s, p_thresh,
+                roi_mask=current_roi_definition_mask
             )
+            print(f"  Activity map from slope: Non-zero count={np.count_nonzero(np.nan_to_num(activity_map_gen))}, Pixels passed slope filter={num_passed_slope}")
+            
+            # Save debug activity map image
+            debug_map_filename = f"debug_activity_{os.path.splitext(mat_filename)[0]}.png"
+            debug_map_output_dir = os.path.join(output_dir, relative_dir_path, "debug_activity_maps")
+            os.makedirs(debug_map_output_dir, exist_ok=True)
+            plt.figure()
+            plt.imshow(activity_map_gen, cmap='hot') # Or 'viridis' or another perceptually uniform map
+            plt.colorbar(label="Activity (abs slope)")
+            plt.title(f"Activity Map: {mat_filename}\n(Passed Slope Filter: {num_passed_slope})")
+            plt.savefig(os.path.join(debug_map_output_dir, debug_map_filename))
+            plt.close()
 
-            if activity_map is None or not np.any(np.isfinite(activity_map)):
-                print("Error: Failed valid activity map generation.")
-                error_count += 1
+
+            if activity_map_gen is None or num_passed_slope == 0: # if map is None or all zeros effectively
+                print(f"  Warning: Activity map is empty or no pixels passed slope filters. Resulting mask will be empty.")
+                # Create an empty mask to save
+                final_mask_generated = np.zeros((H_img, W_img), dtype=bool)
+                final_mask_area = 0
+            else:
+                final_mask_generated, final_mask_area = extract_hotspot_from_map(
+                    activity_map_gen, act_quant, morph_op, apply_act_blur, blur_kern,
+                    roi_mask=current_roi_definition_mask # Use same ROI for consistency
+                )
+
+            if final_mask_generated.size == 0: # Error from extract_hotspot
+                print(f"  Error: Mask extraction failed for {mat_filename}.")
+                error_files_count += 1
                 continue
+            elif final_mask_area == 0:
+                print(f"  Warning: Zero area mask generated for {mat_filename}.")
+            else:
+                print(f"  Generated final mask area: {final_mask_area:.0f} pixels.")
 
-            # --- Extract Hotspot Mask ---
-            hotspot_mask, hotspot_area = extract_hotspot_from_map(
-                activity_map, quantile, morphology_op, apply_blur, tuple(
-                    blur_kernel_size), roi_mask_for_slope_calc
-            )
-
-            if hotspot_mask is None:
-                print("Error: Failed mask extraction.")
-                error_count += 1
-                continue
-            elif hotspot_area == 0:
-                print("Warning: Zero area mask generated.")
-
-            # --- Save Mask ---
             try:
-                mask_filename = os.path.splitext(mat_file)[0] + '_mask.npy'
-                output_subdir = os.path.join(
-                    output_base_dir, relative_path_dir)
-                os.makedirs(output_subdir, exist_ok=True)
-                mask_save_path = os.path.join(output_subdir, mask_filename)
-                np.save(mask_save_path, hotspot_mask)
-                processed_count += 1
+                out_mask_filename = os.path.splitext(mat_filename)[0] + '_mask.npy'
+                final_mask_output_subdir = os.path.join(output_dir, relative_dir_path)
+                os.makedirs(final_mask_output_subdir, exist_ok=True)
+                np.save(os.path.join(final_mask_output_subdir, out_mask_filename), final_mask_generated)
+                processed_files_count += 1
             except Exception as e:
-                print(f"Error saving mask: {e}")
-                error_count += 1
-
+                print(f"  Error saving final mask for {mat_filename}: {e}")
+                error_files_count += 1
+    
+    if total_mat_files == 0:
+        print(f"No .mat files found in dataset: {dataset_dir}")
     print("-" * 30)
-    print(
-        f"Mask generation finished. Success: {processed_count}, Errors: {error_count}")
+    print(f"Mask generation run complete. Processed: {processed_files_count}. Errors: {error_files_count}.")
 
 
-# --- Command-Line Argument Parsing ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate hotspot masks using p-value filtered slope analysis.",
+        description="Generate hotspot masks using P-Value Filtered Slope Analysis.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    # IO Args
-    parser.add_argument("output_dir", help="Root directory to save masks.")
-    parser.add_argument("-k", "--key", default=config.MAT_FRAMES_KEY,
-                        help=f"Key in .mat file (default from config).")
-    parser.add_argument("--fps", type=float, default=5.0,
-                        help="Frames per second of original recording.")
+    # IO
+    parser.add_argument("output_dir",
+                        help="Root directory where generated masks will be saved (subfolders mirroring dataset structure will be created).")
+    parser.add_argument("--dataset_folder", default=config.DATASET_FOLDER,
+                        help="Path to the root dataset folder containing .mat files.")
+    parser.add_argument("--mat_key", default=config.MAT_FRAMES_KEY,
+                        help="Key in .mat files for the thermal frame data.")
+    parser.add_argument("--fps", type=float, default=config.MASK_FPS,
+                        help="Frames per second of the original thermal video recordings.")
 
-    # Slope Analysis Params
-    parser.add_argument("--focus_duration_sec", type=float,
-                        default=10.0, help="Duration (s) for slope analysis.")
-    parser.add_argument("--smooth_window", type=int, default=1,
-                        help="Temporal smoothing window for slope fit (1=None).")
-    parser.add_argument("--p_value_thresh", type=float, default=0.10,
-                        help="P-value threshold for slope significance filter.")
-    parser.add_argument("--envir_para", type=int, default=-1,
-                        choices=[-1, 1], help="Environment parameter (-1=Winter, 1=Summer).")
-    parser.add_argument("--augment", type=float, default=1.0,
-                        help="Exponent for augmenting filtered slope magnitude.")
+    # Slope Calculation Parameters
+    parser.add_argument("--focus_duration_sec", type=float, default=config.MASK_FOCUS_DURATION_SEC,
+                        help="Duration (seconds) of the initial video segment to analyze for slopes.")
+    parser.add_argument("--smooth_window", type=int, default=config.MASK_SMOOTH_WINDOW,
+                        help="Size of the moving average window for temporal smoothing (1 = no smoothing).")
+    parser.add_argument("--p_value_thresh", type=float, default=config.MASK_P_VALUE_THRESHOLD,
+                        help="P-value threshold for statistical significance of the slope.")
+    parser.add_argument("--envir_para", type=int, default=config.MASK_ENVIR_PARA, choices=[-1, 1],
+                        help="Environmental parameter: -1 for Winter/cooling expected, 1 for Summer/heating expected.")
+    parser.add_argument("--augment_slope", type=float, default=config.MASK_AUGMENT_SLOPE,
+                        help="Exponent to augment the magnitude of valid slopes.")
 
-    # Pre-processing Args
-    parser.add_argument("--normalizeT", type=int, default=0,
-                        choices=[0, 1], help="Normalize temperature per frame? (0=No, 1=Yes).")
-    parser.add_argument("--fuselevel", type=int, default=0,
-                        help="Spatial fuse level (0=None).")
-    parser.add_argument("--roi_border_percent", type=float, default=0.20,  # Defaulting to apply ROI
-                        help="Percent border (0-0.5) to exclude for ROI. Set to large value like 0.99 to disable (effectively no ROI).")
+    # Frame Preprocessing Parameters
+    parser.add_argument("--normalize_temp", type=lambda x: (str(x).lower() == 'true'), # Handles bool from CLI
+                        default=config.MASK_NORMALIZE_TEMP_FRAMES,
+                        help="Normalize temperature frames before slope calculation? (True/False)")
+    parser.add_argument("--fuse_level", type=int, default=config.MASK_FUSE_LEVEL,
+                        help="Spatial fuse level for frame preprocessing (0 = no fusing).")
 
-    # Hotspot Extraction Args
-    parser.add_argument("-q", "--quantile", type=float,
-                        default=0.995, help="Quantile threshold (0-1).")
-    parser.add_argument("--morph_op", default="none",
-                        choices=['close', 'open_close', 'none'], help="Morphological operation.")
-    parser.add_argument("--blur", action='store_true',
-                        help="Apply Gaussian blur to activity map.")
-    parser.add_argument("--blur_kernel", type=int, nargs=2,
-                        default=[3, 3], metavar=('H', 'W'), help="Kernel size for Gaussian blur.")
+    # ROI Parameter
+    parser.add_argument("--roi_border_percent", type=float, default=config.MASK_ROI_BORDER_PERCENT,
+                        help="Percentage of border to exclude for ROI (0.0 to <0.5). 0.0 means no ROI.")
 
-    if len(sys.argv) < 2:
+    # Hotspot Extraction Parameters
+    parser.add_argument("--activity_quantile", type=float, default=config.MASK_ACTIVITY_QUANTILE,
+                        help="Quantile to threshold the activity map for hotspot extraction (0-1).")
+    parser.add_argument("--morphology_op", default=config.MASK_MORPHOLOGY_OP, choices=['close', 'open_close', 'none'],
+                        help="Morphological operation to apply to the binary mask.")
+    parser.add_argument("--apply_blur_activity", type=lambda x: (str(x).lower() == 'true'),
+                        default=config.MASK_APPLY_BLUR_TO_ACTIVITY_MAP,
+                        help="Apply Gaussian blur to the activity map before thresholding? (True/False)")
+    parser.add_argument("--blur_kernel_size", type=int, nargs=2, default=config.MASK_BLUR_KERNEL_SIZE,
+                        metavar=('H', 'W'), help="Kernel size (height width) for Gaussian blur.")
+
+    if len(sys.argv) < 2: # Need at least output_dir
         parser.print_help()
         sys.exit(1)
     args = parser.parse_args()
 
-    # --- Argument Validation ---
-    if not 0.0 < args.quantile <= 1.0:
-        print("Error: Quantile invalid.")
-        sys.exit(1)
-    if args.focus_duration_sec <= 0:
-        print("Error: Focus duration invalid.")
-        sys.exit(1)
-    if args.fps <= 0:
-        print("Error: FPS invalid.")
-        sys.exit(1)
-    if args.blur:
-        kh, kw = args.blur_kernel
-        assert kh > 0 and kw > 0
-        assert kh % 2 != 0 and kw % 2 != 0, "Blur kernel dims must be odd"
-    if args.roi_border_percent is not None and not 0.0 <= args.roi_border_percent < 0.5:
-        print("Error: ROI border percent must be >= 0 and < 0.5 if specified.")
-        sys.exit(1)
-    if args.fuselevel < 0:
-        print("Error: Fuse level invalid.")
-        sys.exit(1)
-    if args.smooth_window < 1:
-        print("Error: Smooth window invalid.")
-        sys.exit(1)
-    if not 0.0 < args.p_value_thresh < 1.0:
-        print("Error: P-value threshold invalid.")
-        sys.exit(1)
-    if args.augment <= 0:
-        print("Error: Augment invalid.")
-        sys.exit(1)
+    # --- Basic Validations for critical parameters ---
+    if not (0.0 < args.activity_quantile <= 1.0):
+        print("Error: Activity quantile must be > 0.0 and <= 1.0."); sys.exit(1)
+    if args.focus_duration_sec <= 0 or args.fps <= 0:
+        print("Error: Focus duration and FPS must be positive."); sys.exit(1)
+    if not (0.0 <= args.roi_border_percent < 0.5):
+        print("Error: ROI border percent must be >= 0.0 and < 0.5."); sys.exit(1)
+    if not (0.0 < args.p_value_thresh < 1.0):
+        print("Error: P-value threshold must be > 0.0 and < 1.0."); sys.exit(1)
+    if args.apply_blur_activity:
+        kh, kw = args.blur_kernel_size
+        if not (kh > 0 and kw > 0 and kh % 2 != 0 and kw % 2 != 0):
+            print("Error: Blur kernel dimensions must be positive and odd."); sys.exit(1)
 
-    # Get Input Dir from Config
-    input_dataset_dir = config.DATASET_FOLDER
-    if not input_dataset_dir or not os.path.isdir(input_dataset_dir):
-        print(
-            f"Error: Dataset folder specified in config.py not found: {input_dataset_dir}")
+
+    if not os.path.isdir(args.dataset_folder):
+        print(f"Error: Dataset folder not found: {args.dataset_folder}")
         sys.exit(1)
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    # Set Output Dir
-    output_mask_dir = args.output_dir
-    os.makedirs(output_mask_dir, exist_ok=True)
-
-    # Run processing
-    generate_masks_for_dataset(
-        dataset_root_dir=input_dataset_dir, output_base_dir=output_mask_dir,
-        mat_key=args.key, fps=args.fps,
-        focus_duration_sec=args.focus_duration_sec,
-        quantile=args.quantile, morphology_op=args.morph_op,
-        apply_blur=args.blur, blur_kernel_size=tuple(args.blur_kernel),
-        envir_para=args.envir_para, augment=args.augment,
-        smooth_window=args.smooth_window,
-        p_value_threshold=args.p_value_thresh,
-        fuselevel=args.fuselevel, normalizeT=args.normalizeT,
-        roi_border_percent=args.roi_border_percent
+    run_mask_generation_on_dataset(
+        dataset_dir=args.dataset_folder,
+        output_dir=args.output_dir,
+        mat_key=args.mat_key,
+        fps=args.fps,
+        focus_sec=args.focus_duration_sec,
+        smooth_win=args.smooth_window,
+        p_thresh=args.p_value_thresh,
+        envir=args.envir_para,
+        augment_s=args.augment_slope,
+        norm_t=args.normalize_temp,
+        fuse_lvl=args.fuse_level,
+        roi_perc=args.roi_border_percent,
+        act_quant=args.activity_quantile,
+        morph_op=args.morphology_op,
+        apply_act_blur=args.apply_blur_activity,
+        blur_kern=tuple(args.blur_kernel_size)
     )
 
-    print("Mask generation script finished.")
-
+    print("\nMask generation script finished.")
