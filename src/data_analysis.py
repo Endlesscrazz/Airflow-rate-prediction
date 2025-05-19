@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # File path of the .mat file
-file_path = '/Users/shreyas/Desktop/UoU/Independent-Study/Airflow-rate-prediction/dataset_new/FanPower_1.6V/temp_2025-3-7-19-14-21_21.4_35_13.6_.mat'
+file_path = '/Users/shreyas/Desktop/UoU/Independent-Study/Airflow-rate-prediction/dataset_cleaned/FanPower_1.6V/temp_2025-3-7-19-14-21_21.4_35_13.6_.mat'
 
 # Load the .mat file
 mat_data = scipy.io.loadmat(file_path)

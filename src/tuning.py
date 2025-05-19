@@ -38,22 +38,23 @@ param_grid_svr = {
 
 # MLP Regressor parameter grid (Refined based on simplified architecture)
 param_grid_mlp = {
-    'model__hidden_layer_sizes': [(10,), (30, 15), (15, 5), (20,10,5)], # Try different depths/widths
+    'model__hidden_layer_sizes': [(10,),(15,5), (30,20,10), (5,5)], # Try different depths/widths
     'model__activation': ['relu', 'tanh'],
     'model__solver': ['adam'], # Adam is generally good
-    'model__alpha': [0.001, 0.01, 0.5], # Regularization strength
+    'model__alpha': [0.01, 0.1, 0.5, 1.0], # Regularization strength
     'model__learning_rate_init': [0.001, 0.01],
-    'model__batch_size': [4, 8] # Smaller batch sizes for small dataset
+    'model__batch_size': [4, 8], # Smaller batch sizes for small dataset
+    #'model__max_iter': [500, 1000, 2000]
 }
 
 # Combine grids into a dictionary
 # Add only grids for models returned by modeling.get_regressors()
 param_grids = {
-    # "LinearRegression": param_grid_lr, # Exclude LR from grid search
+    # "LinearRegression": param_grid_lr, 
     "SVR": param_grid_svr,
     "MLPRegressor": param_grid_mlp,
     #"Lasso": param_grid_lasso,
-    "Ridge": param_grid_ridge
+    #"Ridge": param_grid_ridge
 }
 
 # --- Tuning Function ---
@@ -76,7 +77,7 @@ def run_grid_search_all_models(X, y):
         cv_name = "LeaveOneOut"
         print(f"Warning: Using GridSearchCV with LeaveOneOut ({n_splits} splits). This can be very time-consuming.")
     elif config.CV_METHOD == 'KFold':
-        k_folds_config = getattr(config, 'K_FOLDS', 5)
+        k_folds_config = getattr(config, 'K_FOLDS', 3)
         n_splits = min(k_folds_config, num_samples)
         if n_splits < 2:
             cv_strategy = LeaveOneOut(); n_splits = num_samples; cv_name = "LeaveOneOut (Fallback)"

@@ -21,7 +21,7 @@ def get_regressors():
     #regressors["LinearRegression"] = LinearRegression()
    #regressors["Lasso"] = Lasso()
 
-    regressors["Ridge"] = Ridge()
+    #regressors["Ridge"] = Ridge()
 
     # b) Support Vector Regression (Handles non-linearity)
     # Default parameters are often a good starting point, tune C and epsilon later
