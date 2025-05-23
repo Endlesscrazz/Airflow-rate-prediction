@@ -256,14 +256,16 @@ def run_experiment():
 
     # --- Hyperparameter Tuning ---
     print("\n--- Running Hyperparameter Tuning ---")
-    all_best_params, all_best_scores = tuning.run_grid_search_all_models(
-        X, y)  # tuning.py uses config for CV
-    print("\n--- Tuning Results Summary ---")
+    all_best_params, all_best_scores = tuning.run_grid_search_all_models(X, y)  # tuning.py uses config for CV
+    print("\n--- Tuning Results Summary ---\n")
+    print(f"{'Model':<15} {'Neg MSE':>10} {'MSE':>10} {'RMSE':>10}  {'Best Params'}")
+    print("-" * 80)
+
     for name_model_tuned, score_tuned in all_best_scores.items():
         mse_tuned = -score_tuned if np.isfinite(score_tuned) else np.inf
         rmse_tuned = np.sqrt(mse_tuned) if np.isfinite(mse_tuned) else np.inf
         params_tuned = all_best_params.get(name_model_tuned, {})
-        print(f"{name_model_tuned}: Best CV Score (neg_mse)={score_tuned:.4f} (MSE={mse_tuned:.4f}, RMSE={rmse_tuned:.4f}), Best Params={params_tuned}")
+        print(f"{name_model_tuned:<15} {score_tuned:>10.4f} {mse_tuned:>10.4f} {rmse_tuned:>10.4f}  {params_tuned}")
 
     # CV Setup for Evaluation
     num_samples_final = len(y)
