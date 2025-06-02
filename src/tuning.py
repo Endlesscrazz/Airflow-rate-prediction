@@ -1,132 +1,112 @@
 # tuning.py
-"""Hyperparameter tuning using GridSearchCV."""
+"""Hyperparameter tuning using GridSearchCV.
+Includes function for Nested Cross-Validation.
+"""
 
 import numpy as np
-from sklearn.model_selection import GridSearchCV, LeaveOneOut, KFold
-from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import GridSearchCV, KFold, LeaveOneOut, RepeatedKFold
+from sklearn.base import clone
 import config
 import modeling # Import your modeling script
 import time
 import traceback
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error # For nested CV scoring
+from sklearn.exceptions import ConvergenceWarning # To selectively ignore for MLP
+import warnings
 
-# --- Parameter Grids ---
-
-# Define grids for the models included in modeling.get_regressors()
-# These are EXAMPLES - adjust ranges based on your understanding and initial results!
-
-# Linear Regression usually doesn't have hyperparameters tuned in this way
-# (Tuning often involves feature selection/regularization handled differently)
-# param_grid_lr = {} # Empty grid
-
-# param_grid_lasso = {
-#     'model__alpha': [0.0001, 0.001, 0.01, 0.1, 1, 10],  # Regularization strength
-#     'model__max_iter': [1000, 5000, 10000]              # Just in case convergence is an issue
-# }
-
-param_grid_ridge = {
-    'model__alpha': [0.0001, 0.001, 0.01, 0.1, 1, 10, 100],  # Regularization strength
-    'model__solver': ['auto', 'svd', 'cholesky', 'lsqr', 'sparse_cg', 'sag']  # Optional: solver options
-}
-
-# SVR parameter grid (EXAMPLE - C, epsilon, kernel are common)
+# --- Parameter Grids (No feature_selector__k) ---
 param_grid_svr = {
-    'model__C': [0.1, 1, 10, 50], # Regularization parameter
-    'model__epsilon': [0.005, 0.01, 0.1, 0.2], # Epsilon in epsilon-SVR
-    'model__kernel': ['rbf'],# Kernel type
-    'model__gamma': ['scale', 'auto'] # Only for 'rbf', 'poly', 'sigmoid'
+    'model__C': [1, 10, 50], # Reduced for faster testing, expand later
+    'model__epsilon': [0.01, 0.1],
+    'model__kernel': ['rbf'],
+    'model__gamma': ['scale', 'auto']
 }
-
-# MLP Regressor parameter grid (Refined based on simplified architecture)
 param_grid_mlp = {
-    'model__hidden_layer_sizes': [(10,),(15,5), (30,20,10), (5,5)], # Try different depths/widths
+    'model__hidden_layer_sizes': [(10,), (15,5), (5,5)], # Reduced for faster testing
     'model__activation': ['relu', 'tanh'],
-    'model__solver': ['adam'], # Adam is generally good
-    'model__alpha': [0.01, 0.1, 0.5, 1.0], # Regularization strength
+    'model__alpha': [0.01, 0.1, 0.5],
     'model__learning_rate_init': [0.001, 0.01],
-    'model__batch_size': [4, 8], # Smaller batch sizes for small dataset
-    #'model__max_iter': [500, 1000, 2000]
+    'model__batch_size': [4, 8]
 }
-
-# Combine grids into a dictionary
-# Add only grids for models returned by modeling.get_regressors()
 param_grids = {
-    # "LinearRegression": param_grid_lr, 
     "SVR": param_grid_svr,
     "MLPRegressor": param_grid_mlp,
-    #"Lasso": param_grid_lasso,
-    #"Ridge": param_grid_ridge
 }
 
-# --- Tuning Function ---
+# --- Nested CV Function ---
+def run_nested_cv_for_model_type(X_dev, y_dev, material_labels_dev, # ADDED material_labels_dev
+                                 model_name, model_prototype, param_grid_model,
+                                 n_outer_folds=5, n_repeats_outer=5,
+                                 n_inner_folds=3, random_state=None,
+                                 scoring_metric='neg_mean_squared_error', pca_components=None):
+    
+    outer_cv_strategy = RepeatedKFold(
+        n_splits=n_outer_folds, n_repeats=n_repeats_outer, random_state=random_state
+    )
+    
+    outer_fold_metrics = []
+    best_hyperparams_from_inner_folds = []
+    
+    y_true_all_outer_folds_list = [] # Use lists to append
+    y_pred_all_outer_folds_list = []
+    material_labels_all_outer_folds_list = [] # To store material labels for outer test sets
 
-def run_grid_search_all_models(X, y):
-    """
-    Performs GridSearchCV for all models defined in modeling.py for which
-    a parameter grid is provided in tuning.py.
-    """
-    all_regressors = modeling.get_regressors()
-    best_params = {}
-    best_scores = {}
+    print(f"    Running Nested CV for {model_name}: Outer {n_repeats_outer}x{n_outer_folds}-Fold, Inner {n_inner_folds}-Fold GridSearch")
+    
+    for i, (train_idx_outer, test_idx_outer) in enumerate(outer_cv_strategy.split(X_dev, y_dev)): # Pass y_dev for splitting if y has groups for StratifiedKFold
+        X_train_outer, y_train_outer = X_dev.iloc[train_idx_outer], y_dev.iloc[train_idx_outer]
+        X_test_outer, y_test_outer = X_dev.iloc[test_idx_outer], y_dev.iloc[test_idx_outer]
+        material_labels_test_outer = material_labels_dev.iloc[test_idx_outer] # Get material labels for this test fold
 
-    # Define CV strategy based on config (as in main.py)
-    num_samples = len(y)
-    if config.CV_METHOD == 'LeaveOneOut':
-        # GridSearchCV with LOO can be VERY slow, especially for MLP/SVR. Consider KFold.
-        cv_strategy = LeaveOneOut()
-        n_splits = num_samples
-        cv_name = "LeaveOneOut"
-        print(f"Warning: Using GridSearchCV with LeaveOneOut ({n_splits} splits). This can be very time-consuming.")
-    elif config.CV_METHOD == 'KFold':
-        k_folds_config = getattr(config, 'K_FOLDS', 3)
-        n_splits = min(k_folds_config, num_samples)
-        if n_splits < 2:
-            cv_strategy = LeaveOneOut(); n_splits = num_samples; cv_name = "LeaveOneOut (Fallback)"
-        else:
-            cv_strategy = KFold(n_splits=n_splits, shuffle=True, random_state=config.RANDOM_STATE)
-            cv_name = f"{n_splits}-Fold KFold"
-    else: # Default to LOO if config is unclear
-        cv_strategy = LeaveOneOut(); n_splits = num_samples; cv_name = "LeaveOneOut (Default)"
-        print(f"Warning: Unknown CV_METHOD '{config.CV_METHOD}'. Defaulting to LeaveOneOut for GridSearchCV.")
-
-    print(f"\n--- Running Grid Search using {cv_name} ({n_splits} splits) ---")
-
-    for name, model in all_regressors.items():
-        if name not in param_grids:
-            print(f"\n--- Skipping Grid Search for {name} (no param_grid defined) ---")
-            # Store default parameters and a placeholder score (e.g., NaN or -inf)
-            best_params[name] = model.get_params() # Get default params
-            best_scores[name] = -np.inf # Or np.nan
-            continue
-
-        print(f"\n--- Running Grid Search for {name} ---")
-        start_time = time.time()
-        pipeline = modeling.build_pipeline(model, pca_components=None) # Build pipeline for the current model
-        grid_search = GridSearchCV(
-            pipeline,
-            param_grids[name],
-            cv=cv_strategy,
-            scoring='neg_mean_squared_error', # Optimize for lower MSE
-            n_jobs=-1, # Use all available CPU cores
-            verbose=1 # Show some progress
-        )
-
+        # ... (Inner loop GridSearchCV logic as before) ...
+        pipeline_for_grid = modeling.build_pipeline(clone(model_prototype), pca_components=pca_components)
+        inner_cv_strategy = KFold(n_splits=n_inner_folds, shuffle=True, random_state=random_state)
+        grid_search_inner = GridSearchCV(pipeline_for_grid, param_grid_model, cv=inner_cv_strategy, scoring=scoring_metric, n_jobs=-1, verbose=0)
         try:
-            grid_search.fit(X, y)
-            end_time = time.time()
-            print(f"GridSearch completed for {name} in {end_time - start_time:.2f} seconds.")
-            print(f"  Best Score (neg_mean_squared_error): {grid_search.best_score_:.4f}")
-            # Convert score back to positive MSE/RMSE for easier interpretation
-            best_mse = -grid_search.best_score_
-            best_rmse = np.sqrt(best_mse)
-            print(f"  Corresponding Best MSE: {best_mse:.4f}")
-            print(f"  Corresponding Best RMSE: {best_rmse:.4f}")
-            print(f"  Best Parameters Found: {grid_search.best_params_}")
-            best_params[name] = grid_search.best_params_
-            best_scores[name] = grid_search.best_score_
-        except Exception as e:
-            print(f"!!! Error during GridSearchCV for {name}: {e}")
-            traceback.print_exc()
-            best_params[name] = {} # Indicate failure
-            best_scores[name] = -np.inf # Indicate failure
+            with warnings.catch_warnings():
+                if "MLP" in model_prototype.__class__.__name__: warnings.filterwarnings("ignore", category=ConvergenceWarning)
+                grid_search_inner.fit(X_train_outer, y_train_outer)
+        except Exception as e_grid_inner:
+            # ... (error handling)
+            outer_fold_metrics.append({'r2': np.nan, 'rmse': np.nan, 'mae': np.nan}); best_hyperparams_from_inner_folds.append({}); continue
+        current_best_params_inner = grid_search_inner.best_params_
+        best_hyperparams_from_inner_folds.append(current_best_params_inner)
+        
+        model_for_outer_eval_proto_outer = clone(model_prototype)
+        model_for_outer_eval_proto_outer.set_params(**{k.replace('model__',''): v for k,v in current_best_params_inner.items() if k.startswith('model__')})
+        pipeline_for_outer_test_run = modeling.build_pipeline(model_for_outer_eval_proto_outer, pca_components=pca_components)
+        pipeline_for_outer_test_run.fit(X_train_outer, y_train_outer)
+        y_pred_on_outer_test_run = pipeline_for_outer_test_run.predict(X_test_outer)
+        
+        y_true_all_outer_folds_list.extend(y_test_outer.tolist())
+        y_pred_all_outer_folds_list.extend(y_pred_on_outer_test_run.tolist())
+        material_labels_all_outer_folds_list.extend(material_labels_test_outer.tolist()) # Store material labels
 
-    return best_params, best_scores
+        r2_fold_outer = r2_score(y_test_outer, y_pred_on_outer_test_run)
+        # ... (calculate rmse, mae) ...
+        rmse_fold_outer = np.sqrt(mean_squared_error(y_test_outer, y_pred_on_outer_test_run))
+        mae_fold_outer = mean_absolute_error(y_test_outer, y_pred_on_outer_test_run)
+        outer_fold_metrics.append({'r2': r2_fold_outer, 'rmse': rmse_fold_outer, 'mae': mae_fold_outer})
+
+    return (outer_fold_metrics, best_hyperparams_from_inner_folds, 
+            np.array(y_true_all_outer_folds_list), 
+            np.array(y_pred_all_outer_folds_list), 
+            np.array(material_labels_all_outer_folds_list))
+
+# Keep your existing run_grid_search_all_models for the final tuning on the full dev set
+def run_grid_search_for_final_tuning(X, y, model_prototype, param_grid_model, cv_strategy, scoring_metric='neg_mean_squared_error', pca_components=None):
+    """Performs GridSearchCV for a single model type on the full development set."""
+    print(f"  Running final GridSearchCV for {model_prototype.__class__.__name__}...")
+    pipeline = modeling.build_pipeline(clone(model_prototype), pca_components=pca_components)
+    
+    grid_search = GridSearchCV(
+        pipeline, param_grid_model, cv=cv_strategy, scoring=scoring_metric, n_jobs=-1, verbose=1
+    )
+    with warnings.catch_warnings():
+        if "MLP" in model_prototype.__class__.__name__:
+            warnings.filterwarnings("ignore", category=ConvergenceWarning, module="sklearn.neural_network._multilayer_perceptron")
+        grid_search.fit(X, y)
+        
+    print(f"    Best final score ({scoring_metric}): {grid_search.best_score_:.4f}")
+    print(f"    Best final parameters: {grid_search.best_params_}")
+    return grid_search.best_params_, grid_search.best_score_
