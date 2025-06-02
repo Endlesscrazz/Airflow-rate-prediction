@@ -6,10 +6,10 @@ temp distribution, TEMP DIFFERENCE frames using FIXED ABSOLUTE thresholding for 
 """
 
 import numpy as np
-# import cv2 
+# import cv2
 import os
 import scipy.io
-import config  
+import config
 from scipy.stats import linregress
 import warnings
 import traceback
@@ -242,6 +242,8 @@ def calculate_hotspot_features(
     return features
 
 # Main extraction function
+
+
 def extract_features_with_mask(
     frames_or_path,
     mask_path,

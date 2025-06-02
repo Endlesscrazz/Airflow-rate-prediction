@@ -4,58 +4,48 @@
 import os
 import numpy as np
 
-# --- Paths ---
+# --- Project Root Path ---
 _config_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_config_dir)
-DATASET_FOLDER = os.path.join(_project_root, "dataset_cleaned")
 
-# --- Central Output and Model Directories ---
-OUTPUT_DIR = os.path.join(_project_root, "output")
-TRAINED_MODELS_DIR = os.path.join(_project_root, "trained_models")
-BEST_MODELS_DIR = os.path.join(TRAINED_MODELS_DIR, "best_models") 
-FEATURES_SAVE_DIR = os.path.join(OUTPUT_DIR, "saved_features")
+# --- Base Directories (Material-Agnostic) ---
+BASE_OUTPUT_DIR = os.path.join(_project_root, "output")
+BASE_TRAINED_MODELS_DIR = os.path.join(_project_root, "trained_models")
 
-# Path templates for saving models
-# For individual tuned models (e.g., trained_models/SVR_tuned_model.joblib)
-INDIVIDUAL_MODEL_SAVE_PATH_TEMPLATE = os.path.join(TRAINED_MODELS_DIR, "{model_name}_tuned_model.joblib")
-# For the single overall best model (e.g., trained_models/best_models/BEST_SVR_final_model.joblib)
-OVERALL_BEST_MODEL_SAVE_PATH_TEMPLATE = os.path.join(BEST_MODELS_DIR, "BEST_{model_name}_final_model.joblib")
+# --- Parent Directory for Datasets ---
+DATASET_PARENT_DIR = os.path.join(_project_root, "datasets")
 
+# --- Parent Directory for Precomputed Masks ---
+BASE_MASK_INPUT_DIR = os.path.join(_project_root, "hotspot_masks")
 
 # --- Data Loading ---
 MAT_FRAMES_KEY = 'TempFrames'
 
-# --- Data Preprocessing ---
-PREPROCESSING_APPLY_FILTER = False
-PREPROCESSING_FILTER_KERNEL_SIZE = 3
-PREPROCESSING_APPLY_SCALING = False
-PREPROCESSING_SCALE_RANGE = (0, 1)
-
-# --- Model Training Parameters ---
+# --- Model Training & Evaluation Parameters ---
 RANDOM_STATE = 42
 PCA_N_COMPONENTS = None
-EVALUATE_ON_FULL_TRAINING_SET = True
-SAVE_PERMUTATION_IMPORTANCE_PLOT = True 
+EVALUATE_ON_FULL_TRAINING_SET = True # This flag is used by temp_main_nested_cv.py to show train scores
+SAVE_PERMUTATION_IMPORTANCE_PLOT = True # If you want to run perm importance on final dev model
 
-# --- Feature Engineering Parameters ---
-# THRESHOLD_ABS_CHANGE_FOR_AREA = 0.5 # Example
+# --- Cross-Validation Method for Final Tuning and Learning Curve ---
+# (Nested CV itself will define its own outer/inner folds)
+CV_METHOD_FOR_FINAL_TUNING = 'KFold' # e.g., KFold for the GridSearchCV on full dev set
+K_FOLDS_FOR_FINAL_TUNING = 5         # e.g., 5 folds
 
-# --- Cross-Validation ---
-CV_METHOD = 'LeaveOneOut'   # Options: 'LeaveOneOut', 'KFold'
-K_FOLDS = 3                 # Used if CV_METHOD is 'KFold'
+# --- Nested CV Parameters ---
+NESTED_CV_N_OUTER_FOLDS = 5
+NESTED_CV_N_REPEATS = 3 # Only if using RepeatedKFold, not used with simple KFold for outer
+NESTED_CV_N_INNER_FOLDS = 3
 
-# --- Evaluation ---
-BEST_MODEL_METRIC_SCORE = 'neg_mean_squared_error' # Metric for GridSearchCV
-# METRIC_COMPARISON_HIGHER_IS_BETTER = True # Not directly used by GridSearchCV's default behavior
+# --- Learning Curve Parameters ---
+LEARNING_CURVE_TRAIN_SIZES = np.linspace(0.2, 1.0, 7).tolist() # Percentages of training set
+LEARNING_CURVE_CV_FOLDS = 5 # Folds for CV within learning_curve function
 
 # --- Visualization Settings ---
 SAVE_ACTUAL_VS_PREDICTED_PLOT = True
 SAVE_LOSS_CURVE_PLOT = True
 
-# --- Hotspot Mask Generation Parameters (Defaults) ---
-MASK_DIR = os.path.join(_project_root, "hotspot_masks", "slope_p01_focus5s_q99_env1_roi0") 
-MASK_OUTPUT_DIR_DEFAULT_SUBFOLDER = "hotspot_masks_generated" 
-
+# --- Default Parameters for Hotspot Mask Generation ---
 MASK_FPS = 5.0
 MASK_FOCUS_DURATION_SEC = 5.0
 MASK_SMOOTH_WINDOW = 1
@@ -64,9 +54,19 @@ MASK_ENVIR_PARA = 1
 MASK_AUGMENT_SLOPE = 1.0
 MASK_NORMALIZE_TEMP_FRAMES = False
 MASK_FUSE_LEVEL = 0
-MASK_ROI_BORDER_PERCENT = 0.0
+MASK_ROI_BORDER_PERCENT = 0.10
 MASK_ACTIVITY_QUANTILE = 0.99
-MASK_MORPHOLOGY_OP = 'none'
+MASK_MORPHOLOGY_OP = 'open_close'
 MASK_APPLY_BLUR_TO_ACTIVITY_MAP = False
 MASK_BLUR_KERNEL_SIZE = (3, 3)
-# --- END OF MASK GENERATION PARAMETERS ---
+
+# --- Feature Engineering Parameters ---
+FIXED_AREA_THRESHOLD = 0.5
+# Transformation flags can be defined here or directly in main/temp_main
+LOG_TRANSFORM_DELTA_T = True
+LOG_TRANSFORM_AREA = True
+NORMALIZE_AVG_RATE_INITIAL = True
+# NORMALIZE_AVG_MAG_INITIAL = True # Add if used
+
+# --- Path for saving features (used by temp_main) ---
+# temp_main will create its own subfolder within BASE_OUTPUT_DIR
