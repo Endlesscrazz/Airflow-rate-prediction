@@ -17,14 +17,15 @@ import warnings
 # --- Parameter Grids (No feature_selector__k) ---
 param_grid_svr = {
     'model__C': [1, 10, 50], # Reduced for faster testing, expand later
-    'model__epsilon': [0.01, 0.1],
+    'model__epsilon': [0.01, 0.1, 0.2],
     'model__kernel': ['rbf'],
     'model__gamma': ['scale', 'auto']
 }
 param_grid_mlp = {
-    'model__hidden_layer_sizes': [(10,), (15,5), (5,5)], # Reduced for faster testing
+    'model__hidden_layer_sizes': [(10,), (15,5), (5,5), (20,10,5)], # Reduced for faster testing
     'model__activation': ['relu', 'tanh'],
-    'model__alpha': [0.01, 0.1, 0.5],
+    #'model__solver': ['adam'],
+    'model__alpha': [ 0.1, 0.5, 1.0],
     'model__learning_rate_init': [0.001, 0.01],
     'model__batch_size': [4, 8]
 }
@@ -34,7 +35,7 @@ param_grids = {
 }
 
 # --- Nested CV Function ---
-def run_nested_cv_for_model_type(X_dev, y_dev, material_labels_dev, # ADDED material_labels_dev
+def run_nested_cv_for_model_type(X_dev, y_dev, material_labels_dev, 
                                  model_name, model_prototype, param_grid_model,
                                  n_outer_folds=5, n_repeats_outer=5,
                                  n_inner_folds=3, random_state=None,

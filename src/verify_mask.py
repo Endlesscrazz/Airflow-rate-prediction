@@ -219,6 +219,7 @@ if __name__ == "__main__":
 
     # --- Get Input Dataset Directory from Config ---
     input_dataset_dir = config.DATASET_FOLDER
+    #print(f"Current input dataset: {input_dataset_dir}")
     if not input_dataset_dir or not os.path.isdir(input_dataset_dir):
          print(f"Error: Dataset folder specified in config.py not found: {input_dataset_dir}")
          sys.exit(1)
