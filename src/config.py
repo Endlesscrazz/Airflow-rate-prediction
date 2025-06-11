@@ -21,6 +21,8 @@ BASE_MASK_INPUT_DIR = os.path.join(_project_root, "hotspot_masks")
 # --- Data Loading ---
 MAT_FRAMES_KEY = 'TempFrames'
 
+## -- Mask Verfication
+DATASET_FOLDER = os.path.join(_project_root,"datasets/dataset_gypsum")
 # --- Model Training & Evaluation Parameters ---
 RANDOM_STATE = 42
 PCA_N_COMPONENTS = None
@@ -44,6 +46,10 @@ LEARNING_CURVE_CV_FOLDS = 5 # Folds for CV within learning_curve function
 # --- Visualization Settings ---
 SAVE_ACTUAL_VS_PREDICTED_PLOT = True
 SAVE_LOSS_CURVE_PLOT = True
+
+# --- PREPROCESSING FLAGS FOR MASK GENERATION (used by hotspot_mask_generation.py) ---
+MASK_SPATIAL_BLUR_KSIZE = 3       # Kernel size for initial spatial blur (e.g., 3 for 3x3). Set to 0 or 1 to disable.
+MASK_SUBTRACT_PIXEL_MEAN_FOR_SLOPE = True # Subtract per-pixel mean from focus window before slope calc?
 
 # --- Default Parameters for Hotspot Mask Generation ---
 MASK_FPS = 5.0
