@@ -1,5 +1,6 @@
-datasets/
+datasets/*
 dataset_new/
 output_new/
 dataset_cleaned/
 dataset_brickcladding/
+SAM/sam_checkpoints

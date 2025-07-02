@@ -74,5 +74,3 @@ LOG_TRANSFORM_AREA = True
 NORMALIZE_AVG_RATE_INITIAL = True
 # NORMALIZE_AVG_MAG_INITIAL = True # Add if used
 
-# --- Path for saving features (used by temp_main) ---
-# temp_main will create its own subfolder within BASE_OUTPUT_DIR
