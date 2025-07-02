@@ -1,0 +1,61 @@
+--- Starting Full Evaluation Pipeline for Run: 'gypsum' | Exp ID: 1 ---
+--- All console output is being logged to: output_temp/output_gypsum/SP_Blur3_slope_p01_focus5s_q99_env1_roi0_mpOpenClose/exp-1/output.log ---
+--- All other artifacts will be saved in: output_temp/output_gypsum/SP_Blur3_slope_p01_focus5s_q99_env1_roi0_mpOpenClose/exp-1 ---
+
+Loading data for material: gypsum
+hotspot mask path: /Users/shreyas/Desktop/UoU/Independent-Study/Airflow-rate-prediction/hotspot_masks/gypsum/SP_Blur3_slope_p01_focus5s_q99_env1_roi0_mpOpenClose
+Total samples loaded for this run: 19
+
+Warning: Dataset size (19) is too small for a hold-out set. Using all data for development.
+Extracting Features (Dev Set):   0%|                                                                                           | 0/19 [00:00<?, ?it/s]Extracting Features (Dev Set):   5%|████▎                                                                              | 1/19 [00:01<00:24,  1.37s/it]Extracting Features (Dev Set):  11%|████████▋                                                                          | 2/19 [00:02<00:22,  1.30s/it]Extracting Features (Dev Set):  16%|█████████████                                                                      | 3/19 [00:03<00:20,  1.25s/it]Extracting Features (Dev Set):  21%|█████████████████▍                                                                 | 4/19 [00:04<00:17,  1.16s/it]Extracting Features (Dev Set):  26%|█████████████████████▊                                                             | 5/19 [00:05<00:15,  1.11s/it]Extracting Features (Dev Set):  32%|██████████████████████████▏                                                        | 6/19 [00:06<00:14,  1.09s/it]Extracting Features (Dev Set):  37%|██████████████████████████████▌                                                    | 7/19 [00:07<00:12,  1.07s/it]Extracting Features (Dev Set):  42%|██████████████████████████████████▉                                                | 8/19 [00:08<00:11,  1.05s/it]Extracting Features (Dev Set):  47%|███████████████████████████████████████▎                                           | 9/19 [00:09<00:10,  1.03s/it]Extracting Features (Dev Set):  53%|███████████████████████████████████████████▏                                      | 10/19 [00:11<00:09,  1.08s/it]Extracting Features (Dev Set):  58%|███████████████████████████████████████████████▍                                  | 11/19 [00:12<00:08,  1.07s/it]Extracting Features (Dev Set):  63%|███████████████████████████████████████████████████▊                              | 12/19 [00:13<00:07,  1.08s/it]Extracting Features (Dev Set):  68%|████████████████████████████████████████████████████████                          | 13/19 [00:14<00:06,  1.09s/it]Extracting Features (Dev Set):  74%|████████████████████████████████████████████████████████████▍                     | 14/19 [00:15<00:05,  1.05s/it]Extracting Features (Dev Set):  79%|████████████████████████████████████████████████████████████████▋                 | 15/19 [00:16<00:04,  1.06s/it]Extracting Features (Dev Set):  84%|█████████████████████████████████████████████████████████████████████             | 16/19 [00:17<00:03,  1.07s/it]Extracting Features (Dev Set):  89%|█████████████████████████████████████████████████████████████████████████▎        | 17/19 [00:18<00:02,  1.06s/it]Extracting Features (Dev Set):  95%|█████████████████████████████████████████████████████████████████████████████▋    | 18/19 [00:19<00:01,  1.07s/it]Extracting Features (Dev Set): 100%|██████████████████████████████████████████████████████████████████████████████████| 19/19 [00:20<00:00,  1.09s/it]Extracting Features (Dev Set): 100%|██████████████████████████████████████████████████████████████████████████████████| 19/19 [00:20<00:00,  1.09s/it]
+
+Single material run ('gypsum'). Skipping one-hot encoding for 'material' feature.
+
+Experiment parameters logged to: output_temp/output_gypsum/SP_Blur3_slope_p01_focus5s_q99_env1_roi0_mpOpenClose/exp-1/parameters.txt
+Development X_dev (shape (19, 5)) and y_dev (shape (19,)) prepared.
+
+--- Running Nested Cross-Validation on Development Set ---
+Selected Regressors: ['SVR', 'MLPRegressor']
+    Running Nested CV for SVR: Outer 3x5-Fold, Inner 3-Fold GridSearch
+  Aggregated Nested CV Results for SVR:
+    Mean R²: 0.5951 +/- 0.3197
+    Mean RMSE: 0.1372 +/- 0.0424
+    Mean MAE: 0.1175 +/- 0.0320
+Saving plot to: output_temp/output_gypsum/SP_Blur3_slope_p01_focus5s_q99_env1_roi0_mpOpenClose/exp-1/actual_vs_predicted_NESTED_CV_AGG_SVR.png
+    Running Nested CV for MLPRegressor: Outer 3x5-Fold, Inner 3-Fold GridSearch
+  Aggregated Nested CV Results for MLPRegressor:
+    Mean R²: 0.3278 +/- 0.5757
+    Mean RMSE: 0.1759 +/- 0.0622
+    Mean MAE: 0.1449 +/- 0.0481
+Saving plot to: output_temp/output_gypsum/SP_Blur3_slope_p01_focus5s_q99_env1_roi0_mpOpenClose/exp-1/actual_vs_predicted_NESTED_CV_AGG_MLPRegressor.png
+
+--- Best Model Type from Nested CV: SVR (Mean R²: 0.5951) ---
+
+  Hyperparameter Selection Frequency for SVR (from 15 outer folds):
+    Parameter 'C':
+      - 10: 13 times
+      - 1: 2 times
+    Parameter 'epsilon':
+      - 0.01: 13 times
+      - 0.1: 2 times
+    Parameter 'gamma':
+      - scale: 9 times
+      - auto: 6 times
+    Parameter 'kernel':
+      - rbf: 15 times
+
+--- Final Hyperparameter Tuning for SVR on Full Development Set ---
+  Running final GridSearchCV for SVR...
+Fitting 5 folds for each of 18 candidates, totalling 90 fits
+    Best final score (neg_mean_squared_error): -0.0152
+    Best final parameters: {'model__C': 10, 'model__epsilon': 0.01, 'model__gamma': 'scale', 'model__kernel': 'rbf'}
+Fitting final SVR model on dev set...
+  Final model (trained on full dev set) saved to: output_temp/output_gypsum/SP_Blur3_slope_p01_focus5s_q99_env1_roi0_mpOpenClose/exp-1/trained_models/best_model_from_dev_set/FINAL_DEV_MODEL_SVR.joblib
+
+Plotting learning curve for SVR...
+  Learning curve saved to: output_temp/output_gypsum/SP_Blur3_slope_p01_focus5s_q99_env1_roi0_mpOpenClose/exp-1/learning_curve_SVR_COMBINED.png
+
+--- No Hold-Out Set was created. Skipping final hold-out evaluation. ---
+--- The Nested CV result is the primary performance estimate for this run. ---
+
+--- Full Evaluation Pipeline Finished for exp-1 ---
