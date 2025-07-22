@@ -447,7 +447,12 @@ def debug_single_file(mat_file_path, output_plot_dir,
 
     print("-" * 30 + f"\nDebug run for {base_filename} finished." + "-"*30 )
 
+"""
+python3 src/debug-files/debug_single_mask.py \
+    datasets/dataset_two_holes/T1.4V_2.2Pa_2025-6-16-16-44-18_20_30_10_.mat \
+        debug_masks/two_holes/vid-4/iter-1
 
+"""
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Debug hotspot mask generation for a SINGLE .mat file.",

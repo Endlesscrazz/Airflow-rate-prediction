@@ -1,10 +1,9 @@
-# src/run_sam_segmentation.py
+# run_SAM.py
 """
-Script to automatically segment thermal hotspots from all IR videos in a dataset
-using a hybrid approach:
-1. Simple Slope Analysis: Calculates an activity map to find regions of change.
-2. Robust Prompt Point Identification: Filters active regions by shape and isolation.
-3. SAM Segmentation: Uses the identified points as prompts to generate precise masks.
+FINAL BATCH-PROCESSING SCRIPT
+- This is the batch-processing version of the final, modular debug script.
+- It includes all selectable parameters (activity_method, spatial_filter, tophat_filter)
+  to allow for full control and reproducibility across the entire dataset.
 """
 
 import os
@@ -15,93 +14,183 @@ import scipy.io
 import cv2
 import torch
 import matplotlib.pyplot as plt
-from scipy.stats import linregress
-from scipy.spatial import distance
-from tqdm import tqdm
 import fnmatch
+from scipy.stats import kendalltau, mstats
+from tqdm import tqdm
+from joblib import Parallel, delayed
+
 
 # --- Ensure project modules are importable ---
 try:
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-    src_path = os.path.join(project_root, "src")
-    if src_path not in sys.path: sys.path.append(src_path)
-except NameError:
-    project_root = os.getcwd(); src_path = os.path.join(project_root, "src")
-    if src_path not in sys.path: sys.path.append(src_path)
+    import config
+    from segment_anything import sam_model_registry, SamPredictor
+except ImportError:
+    try: from segment_anything import sam_model_registry, SamPredictor
+    except ImportError: print(f"Error: segment_anything library not found.", file=sys.stderr); sys.exit(1)
+    class MockConfig: MAT_FRAMES_KEY = 'TempFrames'
+    config = MockConfig()
 
-# --- Import SAM and Config ---
-import config
-from segment_anything import sam_model_registry, SamPredictor
+# ========================================================================================
+# --- HELPER & CORE FUNCTIONS ---
+# ========================================================================================
 
-def calculate_simple_slope_map(frames):
-    """Calculates a linear regression slope for each pixel over the entire video duration."""
+def save_parameters(args, output_dir):
+    """Saves the command-line arguments to a text file."""
+    params_path = os.path.join(output_dir, "parameters.txt")
+    with open(params_path, 'w') as f:
+        f.write("--- Run Parameters ---\n")
+        for arg, value in sorted(vars(args).items()): f.write(f"{arg}: {value}\n")
+    print(f"  - Saved run parameters to: {params_path}")
+
+def apply_spatial_filter(frames, filter_type='none', d=9, sigmaColor=75, sigmaSpace=75):
+    """(Optional) Applies a spatial filter to each frame to reduce noise."""
+    if filter_type.lower() == 'none':
+        print("  - Step 1: Skipping spatial filter.")
+        return frames
+    print(f"  - Step 1: Applying '{filter_type}' spatial filter to each frame...")
+    H, W, T = frames.shape
+    filtered_frames = np.zeros_like(frames, dtype=np.float64)
+    for i in tqdm(range(T), desc="    Filtering Frames Spatially", leave=False, ncols=100):
+        frame_8bit = cv2.normalize(frames[:, :, i], None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        if filter_type.lower() == 'bilateral':
+            filtered_frame_8bit = cv2.bilateralFilter(frame_8bit, d, sigmaColor, sigmaSpace)
+        else: filtered_frame_8bit = frame_8bit
+        min_val, max_val = np.min(frames[:,:,i]), np.max(frames[:,:,i])
+        filtered_frames[:, :, i] = cv2.normalize(filtered_frame_8bit.astype(np.float64), None, min_val, max_val, cv2.NORM_MINMAX)
+    return filtered_frames
+
+def apply_temporal_smoothing(frames, window_size):
+    """Applies a moving average filter along the time axis."""
+    if window_size <= 1: return frames
+    print(f"\n  - Step 2: Applying temporal smoothing (window: {window_size})...")
+    H, W, T = frames.shape
+    smoothed_frames = np.zeros_like(frames, dtype=np.float64)
+    kernel = np.ones(window_size) / window_size
+    for r in tqdm(range(H), desc="    Smoothing Frames Temporally", leave=False, ncols=100):
+        for c in range(W):
+            pixel_series = frames[r, c, :]
+            smoothed_series = np.convolve(pixel_series, kernel, mode='valid')
+            pad_before = (T - len(smoothed_series)) // 2
+            pad_after = T - len(smoothed_series) - pad_before
+            smoothed_frames[r, c, :] = np.pad(smoothed_series, (pad_before, pad_after), mode='edge')
+    return smoothed_frames
+
+def _calculate_slope_for_row(row_data, t, method):
+    """Helper for parallel calculation."""
+    W = row_data.shape[0]
+    row_values = np.zeros(W, dtype=np.float64)
+    for c in range(W):
+        pixel_series = row_data[c, :]
+        if not np.any(np.isnan(pixel_series)) and len(pixel_series) > 1:
+            try:
+                if method == 'theil_sen': val, _, _, _ = mstats.theilslopes(pixel_series, t, 0.95)
+                elif method == 'kendall_tau': val, _ = kendalltau(t, pixel_series)
+                else: val = 0.0
+            except (ValueError, IndexError): val = 0.0
+            row_values[c] = val if np.isfinite(val) else 0.0
+    return row_values
+
+def generate_activity_map(frames, method, env_para):
+    """Generates an activity map using the specified method."""
     H, W, T = frames.shape
     if T < 2: return np.zeros((H, W), dtype=np.float64)
     t = np.arange(T)
-    slope_map = np.zeros((H, W), dtype=np.float64)
-    for r in range(H): # tqdm can be added here if desired for long processes
-        for c in range(W):
-            pixel_series = frames[r, c, :]
-            if not np.any(np.isnan(pixel_series)):
-                slope, _, _, _, _ = linregress(t, pixel_series)
-                slope_map[r, c] = slope
-    return slope_map
+    print(f"\n  - Step 3: Calculating activity map using '{method}'...")
+    results = Parallel(n_jobs=-1)(
+        delayed(_calculate_slope_for_row)(frames[r, :, :], t, method) for r in tqdm(range(H), desc=f"    Processing Rows ({method})", leave=False, ncols=100)
+    )
+    raw_activity_map = np.vstack(results)
+    if env_para == 1: activity_map = raw_activity_map.copy(); activity_map[activity_map < 0] = 0
+    elif env_para == -1: activity_map = -raw_activity_map; activity_map[activity_map < 0] = 0
+    else: activity_map = np.abs(raw_activity_map)
+    return activity_map
 
-def find_prompt_points_by_shape_and_isolation(activity_map, num_points=2, quantile_thresh=0.98,
-                                             min_area=5, aspect_ratio_limit=4.0):
-    """Finds prompt points by filtering blobs by shape and then re-scoring by isolation."""
-    if activity_map is None or not np.any(activity_map > 0): return None, None
-    active_pixels = activity_map[activity_map > 1e-9]
-    if active_pixels.size == 0: return None, None
+def apply_tophat_filter(activity_map, kernel_size):
+    """(Optional) Applies a White Top-Hat filter to the activity map."""
+    if kernel_size <= 0: return activity_map
+    print(f"\n  - Step 4: Applying White Top-Hat filter (kernel size: {kernel_size})...")
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
+    map_max = np.max(activity_map)
+    if map_max == 0: return activity_map
+    map_8bit = (activity_map / map_max * 255).astype(np.uint8)
+    tophat_map_8bit = cv2.morphologyEx(map_8bit, cv2.MORPH_TOPHAT, kernel)
+    return tophat_map_8bit.astype(np.float64) / 255.0 * map_max
+
+def create_panel_roi_mask(median_frame, erosion_iterations=2):
+    """
+    Creates a more robust binary mask for the panel by specifically finding the
+    largest dark object in the frame.
+    """
+    print("\n  - Step 5: Creating Panel ROI Mask via Otsu's Thresholding...")
+    # 1. Normalize to 8-bit for OpenCV functions
+    frame_norm = cv2.normalize(median_frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+    
+    # 2. Apply Otsu's thresholding. The panel is dark, so we want to keep the dark parts.
+    # THRESH_BINARY_INV makes dark areas white (255) and bright areas black (0).
+    _, thresh = cv2.threshold(frame_norm, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    
+    # 3. Find the largest connected component (which should be the panel)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(thresh, 4, cv2.CV_32S)
+    
+    if num_labels <= 1:
+        print("    Warning: Could not find any distinct objects for ROI mask. Using full frame.", file=sys.stderr)
+        return np.ones_like(median_frame, dtype=np.uint8) # Fallback to no mask
+
+    # The first label (0) is the background. 
+    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+    
+    # Create a mask that only contains the largest component
+    panel_mask = np.zeros_like(thresh)
+    panel_mask[labels == largest_label] = 1
+    
+    # 4. Erode the mask slightly to pull its edges inward
+    if erosion_iterations > 0:
+        kernel = np.ones((3, 3), np.uint8)
+        panel_mask = cv2.erode(panel_mask, kernel, iterations=erosion_iterations)
         
+    return panel_mask
+
+def find_prompts_by_peak_activity(activity_map, num_prompts, quantile_thresh):
+    """Finds prompts by selecting the N blobs with the highest peak activity."""
+    print(f"\n  - Step 6: Finding the {num_prompts} most intense blobs (quantile: {quantile_thresh:.3f})...")
+    if activity_map is None or not np.any(activity_map > 1e-9): return [], []
+    active_pixels = activity_map[activity_map > 1e-9]
+    if active_pixels.size == 0: return [], []
     activity_threshold = np.quantile(active_pixels, quantile_thresh)
     binary_mask = (activity_map >= activity_threshold).astype(np.uint8)
-    kernel = np.ones((3, 3), np.uint8)
-    mask_cleaned = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_cleaned, connectivity=8)
-
-    if num_labels <= 1: return None, None
-
-    candidate_components = []
+    kernel = np.ones((3,3), np.uint8)
+    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary_mask, connectivity=8)
+    if num_labels <= 1: return [], []
+    all_candidates = []
     for i in range(1, num_labels):
-        area = stats[i, cv2.CC_STAT_AREA]
-        w, h = stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
-        if area < min_area: continue
-        aspect_ratio = max(w, h) / min(w, h) if min(w, h) > 0 else float('inf')
-        if aspect_ratio > aspect_ratio_limit: continue
-        
         component_mask = (labels == i)
-        peak_activity = np.max(activity_map[component_mask])
-        candidate_components.append({'centroid': centroids[i], 'score': peak_activity, 'label': i})
-    
-    if not candidate_components: return None, None
+        peak_activity_value = np.max(activity_map[component_mask])
+        all_candidates.append({'centroid': centroids[i], 'stat': stats[i], 'peak_activity': peak_activity_value})
+    sorted_by_intensity = sorted(all_candidates, key=lambda x: x['peak_activity'], reverse=True)
+    top_candidates = sorted_by_intensity[:num_prompts]
+    return top_candidates, all_candidates
 
-    if len(candidate_components) > 1:
-        coords = np.array([c['centroid'] for c in candidate_components])
-        dist_matrix = distance.cdist(coords, coords, 'euclidean')
-        np.fill_diagonal(dist_matrix, np.inf)
-        min_distances = np.min(dist_matrix, axis=1)
-        for i, candidate in enumerate(candidate_components):
-            candidate['score'] = candidate['score'] * np.log1p(min_distances[i])
-    
-    sorted_candidates = sorted(candidate_components, key=lambda x: x['score'], reverse=True)
-    top_candidates = sorted_candidates[:num_points]
-    if len(top_candidates) < num_points: print(f"  Warning: Found only {len(top_candidates)} valid candidates.")
-    
-    prompt_points = np.array([c['centroid'] for c in top_candidates]) if top_candidates else None
-    return prompt_points, candidate_components
+def visualize_prompts(activity_map, all_candidates, final_prompts, save_path, method):
+    fig, ax = plt.subplots(figsize=(14, 10))
+    im = ax.imshow(activity_map, cmap='hot', vmin=0)
+    label = 'Activity (Theil-Sen Slope)' if method == 'theil_sen' else 'Activity (Kendall Tau Corr.)'
+    fig.colorbar(im, ax=ax, label=label)
+    ax.set_title('Debug Map: Prompts from Most Intense Blobs')
+    if all_candidates: ax.scatter([c['centroid'][0] for c in all_candidates], [c['centroid'][1] for c in all_candidates], s=100, facecolors='none', edgecolors='cyan', lw=1.5, label='All Found Blobs')
+    if final_prompts: ax.scatter(np.array([p['centroid'] for p in final_prompts])[:, 0], np.array([p['centroid'] for p in final_prompts])[:, 1], s=600, c='yellow', marker='*', edgecolor='black', label='Final Selected Prompts', zorder=5)
+    ax.legend(); fig.savefig(save_path); plt.close(fig)
 
-def visualize_prompts_on_activity_map(activity_map, all_candidates, final_prompts, save_path):
-    """Visualizes candidate and final prompts on the activity map."""
-    plt.figure(figsize=(12, 9)); plt.imshow(activity_map, cmap='hot'); plt.colorbar(label='Activity (abs_slope)')
-    plt.title('Debug: Activity Map with Candidate and Final Prompts')
-    if all_candidates:
-        candidate_coords = np.array([c['centroid'] for c in all_candidates])
-        plt.scatter(candidate_coords[:, 0], candidate_coords[:, 1], s=80, facecolors='none', edgecolors='cyan', lw=1.5, label='Candidate Prompts')
-    if final_prompts is not None and final_prompts.size > 0:
-        plt.scatter(final_prompts[:, 0], final_prompts[:, 1], s=400, c='lime', marker='*', edgecolor='black', label='Final Selected Prompts')
-    plt.legend(); plt.savefig(save_path); plt.close()
-    print(f"  Saved prompt-finding debug plot to: {save_path}")
+def run_sam_with_box_prompts(frame_rgb, top_candidates, predictor):
+    all_final_masks = []; predictor.set_image(frame_rgb)
+    for cand in top_candidates:
+        stat = cand['stat']
+        x1, y1 = stat[cv2.CC_STAT_LEFT], stat[cv2.CC_STAT_TOP]
+        x2, y2 = x1 + stat[cv2.CC_STAT_WIDTH], y1 + stat[cv2.CC_STAT_HEIGHT]
+        input_box = np.array([x1, y1, x2, y2])
+        masks, _, _ = predictor.predict(point_coords=None, point_labels=None, box=input_box[None, :], multimask_output=False)
+        if len(masks) > 0: all_final_masks.append(masks[0])
+    return all_final_masks
 
 def main(args):
     """Main execution function to process all videos in a dataset."""
@@ -110,128 +199,129 @@ def main(args):
     print(f"Base Output Directory: {args.base_output_dir}")
     print("-" * 30)
 
-    # 1. Load SAM model once to be reused for all videos
     print("Loading SAM model...")
     try:
         sam = sam_model_registry[args.model_type](checkpoint=args.checkpoint_path)
         device = "cuda" if torch.cuda.is_available() else "cpu"; sam.to(device=device)
         predictor = SamPredictor(sam)
-        print(f"SAM model loaded to {device}.")
     except Exception as e:
-        print(f"Error loading SAM model: {e}"); sys.exit(1)
+        print(f"Error loading SAM model: {e}", file=sys.stderr); sys.exit(1)
 
-    # 2. Walk through the dataset directory and find all .mat files
     for root, _, files in os.walk(args.dataset_dir):
         for video_filename in tqdm(fnmatch.filter(files, '*.mat'), desc="Processing Videos"):
             video_path = os.path.join(root, video_filename)
             base_filename = os.path.splitext(video_filename)[0]
+
+            # 1. Get the relative path from the base dataset directory to the current file's directory
+            relative_dir = os.path.relpath(root, args.dataset_dir)
             
-            # --- DYNAMIC OUTPUT FOLDER CREATION ---
-            # Create a subfolder for each video's output
-            video_output_dir = os.path.join(args.base_output_dir, base_filename)
+            # 2. Create the full output path by joining the base output dir, the relative path, and the filename
+            # This will recreate the subfolder structure (e.g., FanPower_1.6V)
+            video_output_dir = os.path.join(args.base_output_dir, relative_dir, base_filename)
+
             os.makedirs(video_output_dir, exist_ok=True)
             
-            print(f"\n--- Processing: {video_filename} ---")
-            print(f"--- Outputs will be saved to: {video_output_dir} ---")
+            save_parameters(args, video_output_dir)
 
-            # A. Load video data
+            print(f"\n--- Processing: {video_filename} ---")
+            print(f"  - Saving outputs to: {video_output_dir}")
+
             try:
                 mat_data = scipy.io.loadmat(video_path)
                 frames = mat_data[config.MAT_FRAMES_KEY].astype(np.float64)
                 H, W, T = frames.shape
                 if T < 2: raise ValueError("Not enough frames.")
             except Exception as e:
-                print(f"  Error loading {video_filename}: {e}. Skipping."); continue
+                print(f"  Error loading {video_filename}: {e}. Skipping.", file=sys.stderr); continue
 
-            # B. Generate Activity Map
-            # print("  Step 1: Generating activity map...") # Can be verbose
-            slope_map = calculate_simple_slope_map(frames)
-            activity_map = np.abs(slope_map)
-
-            # C. Find Prompt Points
-            # print("  Step 2: Finding prompt points...") # Can be verbose
-            prompt_points, all_candidates = find_prompt_points_by_shape_and_isolation(
-                activity_map, num_points=args.num_leaks,
-                min_area=args.min_area, aspect_ratio_limit=args.aspect_ratio_limit,
-                quantile_thresh=args.activity_quantile
+            # --- Execute Pipeline Step-by-Step ---
+            spatially_filtered_frames = apply_spatial_filter(frames, args.spatial_filter)
+            temporally_smoothed_frames = apply_temporal_smoothing(spatially_filtered_frames, args.temporal_smooth_window)
+            activity_map = generate_activity_map(temporally_smoothed_frames, args.activity_method, args.env_para)
+            post_processed_map = apply_tophat_filter(activity_map, args.tophat_filter_size)
+            target_frame = np.median(frames, axis=2)
+            roi_mask = create_panel_roi_mask(target_frame, args.roi_erosion)
+            masked_activity_map = post_processed_map * roi_mask
+            top_candidates, all_candidates = find_prompts_by_peak_activity(
+                masked_activity_map, args.num_leaks, args.activity_quantile
             )
 
-            # Visualize the prompts for this specific video
-            debug_plot_path = os.path.join(video_output_dir, f"{base_filename}_prompt_verification.png")
-            visualize_prompts_on_activity_map(activity_map, all_candidates, prompt_points, debug_plot_path)
-
-            if prompt_points is None:
-                print("  Could not automatically determine prompt points. Skipping SAM segmentation for this file.")
+            if not top_candidates:
+                print(f"  No significant prompts found for {video_filename} after filtering. Skipping.", file=sys.stderr)
                 continue
-            
-            print(f"  Found {len(prompt_points)} final prompt points.")
 
-            # D. Prepare image and run SAM
-            # print("  Step 3: Running SAM prediction...") # Can be verbose
-            target_frame = np.median(frames, axis=2)
+            debug_plot_path = os.path.join(video_output_dir, f"{base_filename}_prompt_verification.png")
+            visualize_prompts(masked_activity_map, all_candidates, top_candidates, debug_plot_path, args.activity_method)
+
+            print("  Running SAM segmentation...")
             frame_normalized_8bit = cv2.normalize(target_frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
             frame_rgb = cv2.cvtColor(frame_normalized_8bit, cv2.COLOR_GRAY2BGR)
-            predictor.set_image(frame_rgb)
-            
-            all_final_masks = []
-            negative_prompt_offset = 15
-            for pos_point in prompt_points:
-                current_points = [pos_point]; current_labels = [1]
-                x, y = pos_point
-                negative_points = [[x,y-negative_prompt_offset], [x,y+negative_prompt_offset], [x-negative_prompt_offset,y], [x+negative_prompt_offset,y]]
-                current_points.extend(negative_points); current_labels.extend([0,0,0,0])
-                masks, scores, _ = predictor.predict(point_coords=np.array(current_points), point_labels=np.array(current_labels), multimask_output=False)
-                if len(masks) > 0: all_final_masks.append(masks[0])
-            
-            if not all_final_masks:
-                print("  SAM did not generate any masks from the prompts. Skipping save."); continue
+            all_final_masks = run_sam_with_box_prompts(frame_rgb, top_candidates, predictor)
 
-            # E. Visualize and Save Final Results
-            final_combined_mask = np.zeros((H, W), dtype=bool)
-            plt.figure(figsize=(12, 9)); plt.imshow(frame_rgb)
-            for mask in all_final_masks:
-                color = np.random.random(3); h, w = mask.shape
-                mask_image = mask.reshape(h,w,1) * np.array([*color, 0.5]).reshape(1,1,-1)
-                plt.imshow(mask_image); final_combined_mask = np.logical_or(final_combined_mask, mask)
-            plt.scatter(prompt_points[:, 0], prompt_points[:, 1], color='lime', marker='*', s=250, edgecolor='black', lw=1.5)
-            plt.title(f"Automated Segmentation for {base_filename}"); plt.axis('off')
-            plot_save_path = os.path.join(video_output_dir, f"{base_filename}_sam_segmentation.png")
-            plt.savefig(plot_save_path); plt.close()
-            print(f"  Final visualization saved to: {plot_save_path}")
+            if not all_final_masks:
+                print(f"  SAM did not generate masks for {video_filename}. Skipping save.", file=sys.stderr)
+                continue
+
+            print("  Saving final outputs...")
+            final_visualization_image = frame_rgb.copy()
+            colors = [[255, 255, 0], [0, 255, 255], [255, 0, 255]] # BGR for OpenCV
+            for i, mask in enumerate(all_final_masks):
+                color = colors[i % len(colors)]
+                color_overlay = np.zeros_like(final_visualization_image)
+                color_overlay[mask] = color
+                final_visualization_image = cv2.addWeighted(final_visualization_image, 1, color_overlay, 0.6, 0)
             
-            mask_save_path = os.path.join(video_output_dir, f"{base_filename}_sam_mask.npy")
-            np.save(mask_save_path, final_combined_mask)
-            print(f"  Final mask saved to: {mask_save_path}")
+            # Save the single visualization image
+            plot_save_path = os.path.join(video_output_dir, f"{base_filename}_sam_segmentation.png")
+            cv2.imwrite(plot_save_path, final_visualization_image)
+
+            # Now, loop through the masks and save each one as a separate .npy file
+            for i, mask in enumerate(all_final_masks):
+                # Append an index to the mask filename, e.g., "_mask_0.npy", "_mask_1.npy"
+                mask_save_path = os.path.join(video_output_dir, f"{base_filename}_mask_{i}.npy")
+                np.save(mask_save_path, mask)
+            
+            print(f"  Saved {len(all_final_masks)} individual masks to {video_output_dir}")
 
     print("\n--- Batch Process Complete ---")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Batch process a dataset of IR videos to automatically segment thermal leaks.")
     
-    # Changed from video_path to dataset_dir
-    parser.add_argument("dataset_dir", type=str, 
-                        help="Path to the root directory of the dataset (e.g., 'datasets/dataset_two_holes').")
-    # Changed from output_dir to base_output_dir
-    parser.add_argument("base_output_dir", type=str, 
-                        help="Base directory to save all outputs. Subfolders will be created for each video.")
+    parser.add_argument("--dataset_dir", required=True, type=str)
+    parser.add_argument("--base_output_dir", required=True, type=str)
     
-    parser.add_argument("--num_leaks", type=int, default=2, 
-                        help="The number of leaks to detect per video.")
-    
-    prompt_group = parser.add_argument_group('Prompt Finding Parameters')
-    prompt_group.add_argument("--min_area", type=int, default=5, help="Minimum pixel area for a candidate hotspot.")
-    prompt_group.add_argument("--aspect_ratio_limit", type=float, default=4.0, help="Maximum aspect ratio to filter edge artifacts.")
-    prompt_group.add_argument("--activity_quantile", type=float, default=0.98, help="Quantile to threshold activity map for candidates.")
+    param_group = parser.add_argument_group('Pipeline Control Parameters')
+    param_group.add_argument("--num_leaks", type=int, default=2)
+    param_group.add_argument("--env_para", type=int, default=0, choices=[1, -1, 0])
+    param_group.add_argument("--activity_method", type=str, default="kendall_tau", choices=['theil_sen', 'kendall_tau'])
+    param_group.add_argument("--spatial_filter", type=str, default="bilateral", choices=['none', 'bilateral'])
+    param_group.add_argument("--temporal_smooth_window", type=int, default=3)
+    param_group.add_argument("--tophat_filter_size", type=int, default=0, help="Kernel size for White Top-Hat filter on activity map. 0 to disable.")
+    param_group.add_argument("--activity_quantile", type=float, default=0.995)
+    param_group.add_argument("--roi_erosion", type=int, default=3)
 
     default_checkpoint = os.path.join('SAM', 'sam_checkpoints', 'sam_vit_b_01ec64.pth')
-    parser.add_argument("--checkpoint_path", type=str, default=default_checkpoint, help="Path to the SAM model checkpoint file.")
-    parser.add_argument("--model_type", type=str, default="vit_b", help="The type of SAM model to use.")
+    parser.add_argument("--checkpoint_path", type=str, default=default_checkpoint)
+    parser.add_argument("--model_type", type=str, default="vit_b")
 
     args = parser.parse_args()
     
     if not os.path.isdir(args.dataset_dir):
-        print(f"Error: Dataset directory not found at '{args.dataset_dir}'"); sys.exit(1)
+        print(f"Error: Dataset directory not found at '{args.dataset_dir}'", file=sys.stderr); sys.exit(1)
     if not os.path.isfile(args.checkpoint_path):
-        print(f"Error: SAM checkpoint not found at '{args.checkpoint_path}'"); sys.exit(1)
+        print(f"Error: SAM checkpoint not found at '{args.checkpoint_path}'", file=sys.stderr); sys.exit(1)
         
     main(args)
+
+"""
+python src/run_SAM.py --dataset_dir datasets/dataset_brickcladding \
+    --base_output_dir output_SAM/datasets/dataset_brickcladding --num_leaks 
+    
+python src/run_SAM.py --dataset_dir datasets/dataset_gypsum \
+    --base_output_dir output_SAM/datasets/dataset_gypsum --num_leaks 1
+
+python src/run_SAM.py --dataset_dir datasets/dataset_two_holes_brickcladding \
+    --base_output_dir output_SAM/datasets/dataset_two_holes_brickcladding 
+"""
