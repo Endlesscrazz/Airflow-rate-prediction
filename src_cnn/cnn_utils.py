@@ -30,25 +30,44 @@ class AirflowSequenceDataset(Dataset):
         sequence_path = os.path.join(self.cnn_dataset_dir, sample_row['image_path'])
         sequence = np.load(sequence_path).astype(np.float32)
 
-        min_val, max_val = sequence.min(), sequence.max()
-        if max_val > min_val:
-            sequence = (sequence - min_val) / (max_val - min_val)
+         # For optical flow data, the loaded shape is (Seq, H, W, Channels)
+        # We need to convert it to PyTorch's desired (Seq, Channels, H, W)
+        # The np.transpose function reorders the axes.
+        # 0->0 (Seq), 3->1 (Channels), 1->2 (H), 2->3 (W)
+        sequence = np.transpose(sequence, (0, 3, 1, 2))
+
+        # min_val, max_val = sequence.min(), sequence.max()
+        # if max_val > min_val:
+        #     sequence = (sequence - min_val) / (max_val - min_val)
         
+        # processed_frames = []
+        # for frame in sequence:
+        #     # The frame is now normalized correctly in the [0, 1] range.
+        #     frame = np.expand_dims(frame, axis=0) # Add channel dimension
+        #     frame_tensor = torch.from_numpy(frame)
+        
+        #     # The advanced augmentations (flips, rotations, jitter, etc.)
+        #     # and the final normalization (to [-1, 1]) will be applied here
+        #     # by the transform pipeline passed from the training script.
+        #     if self.transform:
+        #         frame_tensor = self.transform(frame_tensor)
+            
+        #     processed_frames.append(frame_tensor)
+
+        # image_sequence_tensor = torch.stack(processed_frames)
+
         processed_frames = []
         for frame in sequence:
-            # The frame is now normalized correctly in the [0, 1] range.
-            frame = np.expand_dims(frame, axis=0) # Add channel dimension
+            # frame is now a (2, 128, 128) numpy array
             frame_tensor = torch.from_numpy(frame)
-        
-            # The advanced augmentations (flips, rotations, jitter, etc.)
-            # and the final normalization (to [-1, 1]) will be applied here
-            # by the transform pipeline passed from the training script.
+            
             if self.transform:
                 frame_tensor = self.transform(frame_tensor)
             
             processed_frames.append(frame_tensor)
 
         image_sequence_tensor = torch.stack(processed_frames)
+
 
         # 2. Prepare CONTEXTUAL tabular data
         context_features = sample_row[self.context_feature_cols].values.astype(np.float32)

@@ -52,11 +52,34 @@ class UltimateHybridRegressor(nn.Module):
         # Load a pre-trained ResNet-18
         resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT if pretrained else None)
         
-        # Adapt the first conv layer for our 1-channel images
+        # Adapt the first conv layer for our 1-channel images(for thermal data)
+        # original_conv1 = resnet.conv1
+        # resnet.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # if pretrained:
+        #     resnet.conv1.weight.data = original_conv1.weight.data.sum(dim=1, keepdim=True)
+
+        #(for 2-channel optical flow):
+        # Adapt the first conv layer for our 2-channel images
         original_conv1 = resnet.conv1
-        resnet.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        resnet.conv1 = nn.Conv2d(
+            in_channels=2, # <-- The key change
+            out_channels=64, 
+            kernel_size=7, 
+            stride=2, 
+            padding=3, 
+            bias=False
+        )
         if pretrained:
-            resnet.conv1.weight.data = original_conv1.weight.data.sum(dim=1, keepdim=True)
+            # We can't just sum the weights like before. A common strategy is to
+            # average the R and G channels and discard the B channel, as these
+            # often contain the most motion-relevant information in ImageNet.
+            # Or, for simplicity, we can just average all three.
+            with torch.no_grad():
+                original_weights = original_conv1.weight.data
+                # Average across the 3 RGB channels to get a (64, 1, 7, 7) tensor
+                avg_weights = original_weights.mean(dim=1, keepdim=True)
+                # Repeat this average weight for our two input channels
+                resnet.conv1.weight.data = avg_weights.repeat(1, 2, 1, 1)
 
         # We take all layers of ResNet except for the final classification layer (fc)
         self.cnn = nn.Sequential(*list(resnet.children())[:-1])

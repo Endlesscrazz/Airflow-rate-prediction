@@ -5,3 +5,7 @@ dataset_cleaned/
 dataset_brickcladding/
 SAM/sam_checkpoints/
 cnn_dataset/*
+verified_masks/*
+CNN_Results/*
+output_temp/*
+output_SAM/*
