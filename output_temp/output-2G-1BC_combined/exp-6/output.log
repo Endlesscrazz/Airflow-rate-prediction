@@ -1,0 +1,92 @@
+--- Starting Full Evaluation Pipeline for Run: 'combined' | Exp ID: 6 ---
+
+Loading data from dataset: 'gypsum_single_hole' (Material: gypsum)
+
+Loading data from dataset: 'gypsum_single_hole2' (Material: gypsum)
+
+Loading data from dataset: 'brick_cladding_single_hole' (Material: brick_cladding)
+
+Total samples created after loading and splitting: 67
+Sample counts per material:
+ material
+gypsum            47
+brick_cladding    20
+Name: count, dtype: int64
+
+Creating hold-out set with stratification on airflow rate.
+  Created hold-out set (14 samples). Using 53 for development.
+Extracting Features (Dev Set):   0%|                                                                                        | 0/53 [00:00<?, ?it/s]Extracting Features (Dev Set):   2%|█▌                                                                              | 1/53 [00:01<01:04,  1.25s/it]Extracting Features (Dev Set):   4%|███                                                                             | 2/53 [00:02<00:58,  1.14s/it]Extracting Features (Dev Set):   6%|████▌                                                                           | 3/53 [00:03<00:59,  1.19s/it]Extracting Features (Dev Set):   8%|██████                                                                          | 4/53 [00:04<00:56,  1.15s/it]Extracting Features (Dev Set):   9%|███████▌                                                                        | 5/53 [00:05<00:55,  1.15s/it]Extracting Features (Dev Set):  11%|█████████                                                                       | 6/53 [00:06<00:50,  1.08s/it]Extracting Features (Dev Set):  13%|██████████▌                                                                     | 7/53 [00:07<00:48,  1.05s/it]Extracting Features (Dev Set):  15%|████████████                                                                    | 8/53 [00:08<00:46,  1.04s/it]Extracting Features (Dev Set):  17%|█████████████▌                                                                  | 9/53 [00:09<00:45,  1.02s/it]Extracting Features (Dev Set):  19%|██████████████▉                                                                | 10/53 [00:10<00:43,  1.01s/it]Extracting Features (Dev Set):  21%|████████████████▍                                                              | 11/53 [00:11<00:40,  1.03it/s]Extracting Features (Dev Set):  23%|█████████████████▉                                                             | 12/53 [00:12<00:40,  1.02it/s]Extracting Features (Dev Set):  25%|███████████████████▍                                                           | 13/53 [00:13<00:38,  1.04it/s]Extracting Features (Dev Set):  26%|████████████████████▊                                                          | 14/53 [00:14<00:36,  1.06it/s]Extracting Features (Dev Set):  28%|██████████████████████▎                                                        | 15/53 [00:15<00:38,  1.01s/it]Extracting Features (Dev Set):  30%|███████████████████████▊                                                       | 16/53 [00:16<00:36,  1.00it/s]Extracting Features (Dev Set):  32%|█████████████████████████▎                                                     | 17/53 [00:17<00:37,  1.03s/it]Extracting Features (Dev Set):  34%|██████████████████████████▊                                                    | 18/53 [00:18<00:36,  1.04s/it]Extracting Features (Dev Set):  36%|████████████████████████████▎                                                  | 19/53 [00:19<00:34,  1.02s/it]Extracting Features (Dev Set):  38%|█████████████████████████████▊                                                 | 20/53 [00:20<00:34,  1.04s/it]Extracting Features (Dev Set):  40%|███████████████████████████████▎                                               | 21/53 [00:21<00:32,  1.02s/it]Extracting Features (Dev Set):  42%|████████████████████████████████▊                                              | 22/53 [00:22<00:31,  1.02s/it]Extracting Features (Dev Set):  43%|██████████████████████████████████▎                                            | 23/53 [00:23<00:31,  1.04s/it]Extracting Features (Dev Set):  45%|███████████████████████████████████▊                                           | 24/53 [00:24<00:30,  1.04s/it]Extracting Features (Dev Set):  47%|█████████████████████████████████████▎                                         | 25/53 [00:25<00:28,  1.02s/it]Extracting Features (Dev Set):  49%|██████████████████████████████████████▊                                        | 26/53 [00:26<00:27,  1.02s/it]Extracting Features (Dev Set):  51%|████████████████████████████████████████▏                                      | 27/53 [00:27<00:26,  1.00s/it]Extracting Features (Dev Set):  53%|█████████████████████████████████████████▋                                     | 28/53 [00:28<00:24,  1.02it/s]Extracting Features (Dev Set):  55%|███████████████████████████████████████████▏                                   | 29/53 [00:29<00:23,  1.03it/s]Extracting Features (Dev Set):  57%|████████████████████████████████████████████▋                                  | 30/53 [00:30<00:23,  1.01s/it]Extracting Features (Dev Set):  58%|██████████████████████████████████████████████▏                                | 31/53 [00:31<00:22,  1.01s/it]Extracting Features (Dev Set):  60%|███████████████████████████████████████████████▋                               | 32/53 [00:32<00:21,  1.02s/it]Extracting Features (Dev Set):  62%|█████████████████████████████████████████████████▏                             | 33/53 [00:33<00:19,  1.01it/s]Extracting Features (Dev Set):  64%|██████████████████████████████████████████████████▋                            | 34/53 [00:34<00:19,  1.02s/it]Extracting Features (Dev Set):  66%|████████████████████████████████████████████████████▏                          | 35/53 [00:35<00:18,  1.02s/it]Extracting Features (Dev Set):  68%|█████████████████████████████████████████████████████▋                         | 36/53 [00:36<00:17,  1.02s/it]Extracting Features (Dev Set):  70%|███████████████████████████████████████████████████████▏                       | 37/53 [00:37<00:15,  1.02it/s]Extracting Features (Dev Set):  72%|████████████████████████████████████████████████████████▋                      | 38/53 [00:38<00:14,  1.05it/s]Extracting Features (Dev Set):  74%|██████████████████████████████████████████████████████████▏                    | 39/53 [00:39<00:13,  1.04it/s]Extracting Features (Dev Set):  75%|███████████████████████████████████████████████████████████▌                   | 40/53 [00:40<00:12,  1.06it/s]Extracting Features (Dev Set):  77%|█████████████████████████████████████████████████████████████                  | 41/53 [00:41<00:11,  1.07it/s]Extracting Features (Dev Set):  79%|██████████████████████████████████████████████████████████████▌                | 42/53 [00:42<00:10,  1.08it/s]Extracting Features (Dev Set):  81%|████████████████████████████████████████████████████████████████               | 43/53 [00:43<00:09,  1.06it/s]Extracting Features (Dev Set):  83%|█████████████████████████████████████████████████████████████████▌             | 44/53 [00:44<00:08,  1.07it/s]Extracting Features (Dev Set):  85%|███████████████████████████████████████████████████████████████████            | 45/53 [00:45<00:07,  1.08it/s]Extracting Features (Dev Set):  87%|████████████████████████████████████████████████████████████████████▌          | 46/53 [00:46<00:06,  1.06it/s]Extracting Features (Dev Set):  89%|██████████████████████████████████████████████████████████████████████         | 47/53 [00:47<00:05,  1.05it/s]Extracting Features (Dev Set):  91%|███████████████████████████████████████████████████████████████████████▌       | 48/53 [00:48<00:05,  1.03s/it]Extracting Features (Dev Set):  92%|█████████████████████████████████████████████████████████████████████████      | 49/53 [00:49<00:04,  1.06s/it]Extracting Features (Dev Set):  94%|██████████████████████████████████████████████████████████████████████████▌    | 50/53 [00:50<00:03,  1.02s/it]Extracting Features (Dev Set):  96%|████████████████████████████████████████████████████████████████████████████   | 51/53 [00:51<00:01,  1.02it/s]Extracting Features (Dev Set):  98%|█████████████████████████████████████████████████████████████████████████████▌ | 52/53 [00:52<00:01,  1.00s/it]Extracting Features (Dev Set): 100%|███████████████████████████████████████████████████████████████████████████████| 53/53 [00:53<00:00,  1.01s/it]Extracting Features (Dev Set): 100%|███████████████████████████████████████████████████████████████████████████████| 53/53 [00:53<00:00,  1.01s/it]
+
+Applying one-hot encoding for 'material' feature.
+
+Development X_dev (shape (53, 8)) and y_dev (shape (53,)) prepared.
+Feature set: ['delta_T_log', 'hotspot_area_log', 'hotspot_avg_temp_change_rate_initial_norm', 'material_brick_cladding', 'material_gypsum', 'overall_std_deltaT', 'temp_max_overall_initial', 'temp_std_avg_initial']
+
+--- Running Nested Cross-Validation on Development Set ---
+Selected Regressors: ['SVR', 'MLPRegressor', 'XGBRegressor']
+    Running Group-Aware Nested CV for SVR: Outer 5-Fold GroupKFold, Inner 3-Fold GroupShuffleSplit
+  Aggregated Nested CV Results for SVR:
+    Mean R²: 0.1923 +/- 0.4218
+    Mean RMSE: 0.3733 +/- 0.1263
+    Mean MAE: 0.2851 +/- 0.0815
+Saving plot to: output_temp/output-2G-1BC_combined/exp-6/actual_vs_predicted_NESTED_CV_AGG_SVR.png
+    Running Group-Aware Nested CV for MLPRegressor: Outer 5-Fold GroupKFold, Inner 3-Fold GroupShuffleSplit
+  Aggregated Nested CV Results for MLPRegressor:
+    Mean R²: 0.1354 +/- 0.2714
+    Mean RMSE: 0.3850 +/- 0.0455
+    Mean MAE: 0.2913 +/- 0.0330
+Saving plot to: output_temp/output-2G-1BC_combined/exp-6/actual_vs_predicted_NESTED_CV_AGG_MLPRegressor.png
+    Running Group-Aware Nested CV for XGBRegressor: Outer 5-Fold GroupKFold, Inner 3-Fold GroupShuffleSplit
+  Aggregated Nested CV Results for XGBRegressor:
+    Mean R²: 0.2230 +/- 0.2326
+    Mean RMSE: 0.3697 +/- 0.0786
+    Mean MAE: 0.2696 +/- 0.0360
+Saving plot to: output_temp/output-2G-1BC_combined/exp-6/actual_vs_predicted_NESTED_CV_AGG_XGBRegressor.png
+
+--- Best Model Type from Nested CV: XGBRegressor (Mean R²: 0.2230) ---
+
+  Hyperparameter Selection Frequency for XGBRegressor (from 5 outer folds):
+    Parameter 'colsample_bytree':
+      - 0.8: 4 times
+      - 0.7: 1 times
+    Parameter 'gamma':
+      - 0: 3 times
+      - 0.5: 2 times
+    Parameter 'learning_rate':
+      - 0.05: 3 times
+      - 0.2: 2 times
+    Parameter 'max_depth':
+      - 2: 3 times
+      - 4: 1 times
+      - 3: 1 times
+    Parameter 'n_estimators':
+      - 50: 3 times
+      - 150: 2 times
+    Parameter 'reg_alpha':
+      - 0.5: 3 times
+      - 0: 1 times
+      - 0.1: 1 times
+    Parameter 'reg_lambda':
+      - 2: 4 times
+      - 1: 1 times
+    Parameter 'subsample':
+      - 0.7: 3 times
+      - 0.8: 2 times
+
+--- Final Hyperparameter Tuning for XGBRegressor on Full Development Set ---
+  Running final GridSearchCV for XGBRegressor...
+Fitting 5 folds for each of 2916 candidates, totalling 14580 fits
+    Best final score (neg_mean_squared_error): -0.1457
+    Best final parameters: {'model__colsample_bytree': 0.8, 'model__gamma': 0, 'model__learning_rate': 0.05, 'model__max_depth': 2, 'model__n_estimators': 50, 'model__reg_alpha': 0.5, 'model__reg_lambda': 2, 'model__subsample': 0.7}
+  Learning curve saved to: output_temp/output-2G-1BC_combined/exp-6/learning_curve_XGBRegressor.png
+
+--- Evaluating Final Model on Hold-Out Set ---
+Extracting Features (Hold-Out):   0%|                                                                                       | 0/14 [00:00<?, ?it/s]Extracting Features (Hold-Out):   7%|█████▋                                                                         | 1/14 [00:01<00:17,  1.35s/it]Extracting Features (Hold-Out):  14%|███████████▎                                                                   | 2/14 [00:02<00:15,  1.32s/it]Extracting Features (Hold-Out):  21%|████████████████▉                                                              | 3/14 [00:03<00:13,  1.22s/it]Extracting Features (Hold-Out):  29%|██████████████████████▌                                                        | 4/14 [00:04<00:10,  1.10s/it]Extracting Features (Hold-Out):  36%|████████████████████████████▏                                                  | 5/14 [00:05<00:09,  1.04s/it]Extracting Features (Hold-Out):  43%|█████████████████████████████████▊                                             | 6/14 [00:06<00:08,  1.05s/it]Extracting Features (Hold-Out):  50%|███████████████████████████████████████▌                                       | 7/14 [00:07<00:07,  1.03s/it]Extracting Features (Hold-Out):  57%|█████████████████████████████████████████████▏                                 | 8/14 [00:08<00:06,  1.05s/it]Extracting Features (Hold-Out):  64%|██████████████████████████████████████████████████▊                            | 9/14 [00:10<00:05,  1.13s/it]Extracting Features (Hold-Out):  71%|███████████████████████████████████████████████████████▋                      | 10/14 [00:11<00:04,  1.14s/it]Extracting Features (Hold-Out):  79%|█████████████████████████████████████████████████████████████▎                | 11/14 [00:12<00:03,  1.07s/it]Extracting Features (Hold-Out):  86%|██████████████████████████████████████████████████████████████████▊           | 12/14 [00:13<00:02,  1.07s/it]Extracting Features (Hold-Out):  93%|████████████████████████████████████████████████████████████████████████▍     | 13/14 [00:14<00:01,  1.06s/it]Extracting Features (Hold-Out): 100%|██████████████████████████████████████████████████████████████████████████████| 14/14 [00:15<00:00,  1.08s/it]Extracting Features (Hold-Out): 100%|██████████████████████████████████████████████████████████████████████████████| 14/14 [00:15<00:00,  1.10s/it]
+  Hold-Out Performance (XGBRegressor): R²=0.3752, RMSE=0.2923
+Saving plot to: output_temp/output-2G-1BC_combined/exp-6/actual_vs_predicted_HOLD_OUT_XGBRegressor.png
+
+--- Generating Diagnostic Plots for Best Model ---
+  Saved permutation importance plot to: output_temp/output-2G-1BC_combined/exp-6/permutation_importance_XGBRegressor.png
+  Saved residuals plot to: output_temp/output-2G-1BC_combined/exp-6/residuals_vs_fitted_XGBRegressor.png
+
+--- Full Evaluation Pipeline Finished ---
