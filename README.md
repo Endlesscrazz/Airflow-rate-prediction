@@ -20,7 +20,7 @@ The final, optimized model demonstrates the ability to generalize to unseen data
 *   **Hold-Out Set Performance (Pre-Tuning):** A final, generalizable **R² of 0.5254** on the unseen hold-out set.
 *   **Post-Tuning Analysis:** While Optuna identified a stronger hyperparameter set (potential R² of 0.62), cross-validation and hold-out tests revealed that the model's performance is ultimately **data-limited**, showing high variance due to the small dataset size. The pre-tuning result of **0.5254** remains the most representative successful outcome.
 
-![Hold-Out Set Performance for 1-Channel Thermal Model](holdout_results/holdout_plot_lstm_1ch_optuna.png)
+![Hold-Out Set Performance for 1-Channel Thermal Model](CNN_Results/iter-20-CNN-LSTM(1ch-thermal)/holdout_plot_lstm_1ch.png)
 *Figure 1: The final model's predictions on the unseen hold-out set. While performance varies, the model shows a clear, generalizable positive correlation.*
 
 ## 📂 Project Structure
