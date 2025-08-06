@@ -1,79 +1,68 @@
 # Predicting Airflow Rate from Thermal Videos using Deep Learning
 
-This project tackles the challenging task of predicting airflow leakage rates by analyzing thermal infrared (IR) videos. The primary goal is to develop a model that can learn the relationship between the spatio-temporal patterns of a thermal plume and the quantitative airflow rate.
+This project develops a deep learning pipeline to predict airflow leakage rates by analyzing thermal infrared (IR) videos. The core of the project is a hybrid **CNN-LSTM model** that learns spatio-temporal patterns from video sequences to perform a regression task.
 
-The project began with a traditional machine learning approach using handcrafted features, which ultimately proved insufficient due to the high noise and low diversity of the dataset. The strategy was successfully pivoted to a Deep Learning approach, culminating in a hybrid **CNN-LSTM model** that can generalize to unseen data.
+The research followed a systematic progression:
+1.  **Initial Approach:** An initial phase using handcrafted features and traditional ML models demonstrated the limitations of summary statistics, suffering from severe overfitting.
+2.  **Pivot to Deep Learning:** The strategy was pivoted to a deep learning approach to learn features directly from pixel data.
+3.  **Systematic Experimentation:** Through controlled experiments, we proved that a **1-Channel Thermal video** representation was superior to optical flow and that a temporal model (LSTM) was critical for success.
+4.  **Automated Optimization:** A full hyperparameter search using **Optuna** was conducted to find the optimal model architecture and training parameters.
+
+This repository contains the final, refactored code for the successful deep learning pipeline.
 
 ## 📈 Key Findings & Best Results
 
-After extensive experimentation, the optimal approach was identified and validated:
+The final, optimized model demonstrates the ability to generalize to unseen data, representing a significant breakthrough from the initial feature-based methods.
 
-*   **Best Model:** A hybrid **CNN-LSTM with Attention** (`UltimateHybridRegressor`).
-*   **Best Data Representation:** **1-Channel Raw Thermal Video Sequences**. This surprisingly outperformed more complex representations like optical flow, indicating that the raw temperature evolution contains the most valuable signal.
-*   **Cross-Validation Performance:** The model achieved a stable average **R² of 0.4382 ± 0.1192** across a 5-fold group cross-validation.
-*   **Hold-Out Set Performance:** The final model successfully generalized to a completely unseen hold-out set, achieving a **final R² of 0.5254**. This positive result on unseen data is the key success of this project.
+*   **Best Model:** A hybrid **CNN-LSTM with Attention** (`UltimateHybridRegressor`), tuned with Optuna.
+*   **Best Data Representation:** **1-Channel Raw Thermal Video Sequences** with a 10-second focus duration.
+*   **Cross-Validation Performance (Pre-Tuning):** An average **R² of 0.4382 ± 0.1192** across a 5-fold group cross-validation.
+*   **Hold-Out Set Performance (Pre-Tuning):** A final, generalizable **R² of 0.5254** on the unseen hold-out set.
+*   **Post-Tuning Analysis:** While Optuna identified a stronger hyperparameter set (potential R² of 0.62), cross-validation and hold-out tests revealed that the model's performance is ultimately **data-limited**, showing high variance due to the small dataset size. The pre-tuning result of **0.5254** remains the most representative successful outcome.
 
-
-*Figure 1: The final model's predictions on the unseen hold-out set, demonstrating a clear positive correlation and successful generalization.*
+![Hold-Out Set Performance for 1-Channel Thermal Model](holdout_results/holdout_plot_lstm_1ch_optuna.png)
+*Figure 1: The final model's predictions on the unseen hold-out set. While performance varies, the model shows a clear, generalizable positive correlation.*
 
 ## 📂 Project Structure
 
-The repository is organized into the two main phases of the project. The successful deep learning pipeline is contained within `src_cnn`.
+The codebase has been refactored for clarity and maintainability. The core logic resides in `src_cnn`, while executable scripts are in the `scripts` directory.
 
 ```
 .
-├── CNN_dataset/                # Processed datasets for the CNN models reside here (not checked into git)
-├── src_cnn/
-│   ├── cnn_models.py           # PyTorch model architectures (CNN-LSTM, CNN-Average)
-│   ├── cnn_utils.py            # Custom PyTorch Dataset class
-│   ├── create_dataset.py       # Unified script to generate thermal, flow, or hybrid datasets
-│   ├── train_cnn.py            # Main script for running cross-validation
-│   ├── train_final_model.py    # Script to train the final model on all dev data
-│   ├── evaluate_holdout.py     # Script to evaluate the final model on the hold-out set
-│   ├── hyperparam_search.py    # Optuna script for hyperparameter optimization
-│   └── agg_results.py          # Utility to aggregate CV results
+├── archive/                  # Contains the old, feature-based approach for historical reference
+├── CNN_dataset/              # Root directory for processed datasets (ignored by git)
+├── scripts/                  # All executable Python scripts for the main workflow
+│   ├── create_dataset.py     # Unified script to generate thermal, flow, or hybrid datasets
+│   ├── split_data.py         # Creates train/hold-out splits from a master metadata file
+│   ├── hyperparam_search.py  # Optuna script for hyperparameter optimization
+│   ├── train_cv.py           # Main script for running cross-validation
+│   ├── train_final.py        # Script to train the final model on all dev data
+│   ├── evaluate_holdout.py   # Script to evaluate the final model on the hold-out set
+│   ├── agg_results.py        # Utility to aggregate and summarize CV results
+│   └── vis_dataset.py        # Utility to create GIF visualizations of dataset samples
 │
-├── src_feature_based/          # Code from the initial handcrafted feature engineering phase
-├── visualizations/             # Output directory for GIF visualizations
-├── trained_models_final/       # Output directory for final trained model weights
-├── results_..._CV/             # Output directories for cross-validation results
-└── ...
+└── src_cnn/                  # Core library for the deep learning pipeline
+    ├── config.py             # Central configuration file for all parameters
+    ├── cnn_models.py         # PyTorch model architectures
+    ├── cnn_utils.py          # Custom PyTorch Dataset class
+    ├── data_utils.py         # Helper functions for parsing filenames
+    └── feature_engineering.py# Handcrafted feature calculation logic
 ```
-
-## 🔬 Methodology & Workflow
-
-The project followed a systematic, data-driven workflow to overcome initial challenges.
-
-### Phase 1: Handcrafted Feature Engineering
-
-The project began by extracting over 20 summary-statistic features (e.g., hotspot area, temperature change rate) from the videos. While rigorously evaluated with Nested Cross-Validation, this approach consistently suffered from extreme overfitting (Training R² ≈ 0.9 vs. Validation R² ≈ 0.3), demonstrating that these features were not robust enough to capture the complex underlying physics.
-
-### Phase 2: Pivot to Deep Learning
-
-Based on the limitations of Phase 1, the strategy was pivoted to a deep learning approach to allow the model to learn features directly from pixel data.
-
-1.  **Data Representation Experiments:** A unified pipeline (`create_dataset.py`) was built to generate datasets of different representations. Comparative experiments proved that **1-Channel Thermal video** was a superior input to 2-Channel Optical Flow, which had previously failed to generalize (Hold-Out R² of -0.05).
-
-2.  **Model Architecture Validation:** A powerful CNN-LSTM model with Attention was implemented. A diagnostic test comparing it to a simpler "CNN-Average" model (which produced a CV R² of -0.82) conclusively proved that **modeling the temporal sequence with an LSTM is critical for this task.**
-
-3.  **Hyperparameter Optimization with Optuna:** An automated hyperparameter search (`hyperparam_search.py`) was conducted using Optuna to find the optimal model architecture and training parameters. The search revealed that a larger model with stronger regularization (`weight_decay`) was optimal, improving the potential R² on a single validation fold to **0.626**.
-
-4.  **Final Validation:** The best hyperparameters from the Optuna search were validated with a full 5-fold cross-validation, confirming their robustness and leading to the final successful model.
 
 ## 🚀 Reproducibility Guide
 
-Follow these steps to set up the environment, process data, and reproduce the results.
+Follow these steps to set up the environment, process data, and reproduce the main results.
 
 ### 1. Setup Environment
 
-First, clone the repository and set up the Python environment.
+Clone the repository and create the Conda environment.
 
 ```bash
 # Clone the repository
 git clone https://github.com/Endlesscrazz/Airflow-rate-prediction.git
 cd Airflow-rate-prediction
 
-# Create and activate a conda environment
+# Create and activate the conda environment
 conda create -n airflow_env python=3.9
 conda activate airflow_env
 
@@ -83,34 +72,33 @@ pip install -r requirements.txt
 
 ### 2. Data Preparation
 
-The raw `.mat` video files and `.npy` mask files are not included in this repository. You must place them in a directory structure as expected by the `src_feature_based/config.py` file.
+The raw `.mat` video files and `.npy` mask files are not included in this repository. Place your raw data directories (e.g., `dataset_gypsum`) inside a top-level `datasets_raw/` folder and the corresponding mask directories inside `masks_raw/`.
 
-Once the raw data is in place, generate the 1-channel thermal dataset, which was found to be the best performer.
+Once the raw data is in place, generate the 1-channel thermal dataset (10-second focus), which was found to be the best performer.
 
 ```bash
 # This will create the dataset in CNN_dataset/dataset_1ch_thermal/
-python -m src_cnn.create_dataset --type thermal
+python -m scripts.create_dataset --type thermal
 ```
 
 ### 3. Create Train / Hold-Out Split
 
-Before training, you need to split the full metadata file into a training/development set and a final hold-out set.
+Before training, split the full metadata file into a development set and a final hold-out set.
 
 ```bash
-# This script is located in the src_feature_based directory
-# It will create train_metadata.csv and holdout_metadata.csv inside the dataset folder
-python -m src_feature_based.split_data --metadata_path CNN_dataset/dataset_1ch_thermal/metadata.csv
+# This script will create train_metadata.csv and holdout_metadata.csv inside the dataset folder
+python -m scripts.split_data --dataset_dir CNN_dataset/dataset_1ch_thermal
 ```
 
-### 4. Run Cross-Validation (with Optuna-Tuned Hyperparameters)
+### 4. Run Cross-Validation
 
-To verify the model's performance, run the 5-fold cross-validation. The `train_cnn.py` script has been pre-configured with the best hyperparameters found by the Optuna search.
+To verify the model's performance with the Optuna-tuned hyperparameters, run the 5-fold cross-validation.
 
-*Note: This is best run on a machine with a GPU. The following command is an example for running a single fold locally. For a full 5-fold run, use the `run_chpc_job.sh` script on an HPC cluster or loop through folds 0-4.*
+*Note: This is best run on a machine with a GPU. The following command is for a single fold. Use the provided SLURM scripts or a simple bash loop to run all 5 folds (0 through 4).*
 
 ```bash
 # Run a single fold (e.g., fold 0) of the cross-validation
-python -m src_cnn.train_cnn \
+python -m scripts.train_cv \
     --fold 0 \
     --total_folds 5 \
     --model_type "lstm" \
@@ -118,18 +106,18 @@ python -m src_cnn.train_cnn \
     --in_channels 1
 ```
 
-After running all 5 folds, aggregate the results:
+After running all folds, aggregate the results:
 ```bash
-python -m src_cnn.agg_results --model_type lstm --in_channels 1
+python -m scripts.agg_results --model_type lstm --in_channels 1 --optuna_tuned
 ```
 
 ### 5. Train Final Model
 
-After cross-validation, train the final model on the entire development set (`train_metadata.csv`).
+Train the final model on the entire development set (`train_metadata.csv`) using the optimized parameters.
 
 ```bash
 # This will save the final model to trained_models_final/final_model_lstm_1ch_optuna.pth
-python -m src_cnn.train_final_model \
+python -m scripts.train_final \
     --model_type "lstm" \
     --dataset_dir "CNN_dataset/dataset_1ch_thermal" \
     --in_channels 1
@@ -141,7 +129,7 @@ Finally, evaluate the performance of the trained model on the unseen hold-out se
 
 ```bash
 # This command loads the optuna-tuned model and evaluates it
-python -m src_cnn.evaluate_holdout \
+python -m scripts.evaluate_holdout \
     --model_type "lstm" \
     --dataset_dir "CNN_dataset/dataset_1ch_thermal" \
     --in_channels 1 \
@@ -150,7 +138,7 @@ python -m src_cnn.evaluate_holdout \
 
 ## 🔮 Future Work
 
-While the current model is successful, several avenues for further improvement exist:
-*   **Input Sequence Analysis:** Experiment with shorter, more information-dense video clips (e.g., the first 5 seconds) to see if it provides a cleaner signal.
-*   **Advanced Architectures:** Explore 3D-CNNs (e.g., R3D_18), which are designed to process spatio-temporal data jointly and may capture dynamics more effectively.
-*   **Data Acquisition:** The most significant improvements will likely come from acquiring more diverse training data across a wider range of materials, `delta_T` conditions, and airflow rates.
+While the current model is successful, its performance is primarily limited by the dataset. Future work should focus on:
+*   **Data Acquisition:** The most impactful improvement would be to collect more diverse training data across a wider range of materials, `delta_T` conditions, and airflow rates to improve model robustness.
+*   **Problem Reframing:** Given the high noise and label ambiguity, pivoting to a **classification task** (e.g., predicting "Low," "Medium," "High" flow) could yield a more reliable and practically useful model.
+*   **Advanced Architectures:** Explore 3D-CNNs (e.g., R3D_18), which are inherently designed for spatio-temporal data and may capture dynamics more effectively.
