@@ -32,7 +32,7 @@
 # This is your best-performing model so far, for comparison.
 # To run this, comment out the block above and uncomment this one.
 MODEL_TYPE="lstm"
-DATASET_DIR="CNN_dataset/dataset_1ch_thermal"
+DATASET_DIR="CNN_dataset/dataset_1ch_thermal_f5s"
 IN_CHANNELS=1
 
 #==============================================================================

@@ -12,10 +12,10 @@ class AirflowSequenceDataset(Dataset):
     """
     Custom PyTorch Dataset for loading sequences of thermal ROI patches.
     """
-    # --- START OF FIX ---
+
     def __init__(self, metadata_df, cnn_dataset_dir, context_feature_cols,
-                 dynamic_feature_cols, transform=None, task='regression'): # <-- Add 'task' to the signature
-    # --- END OF FIX ---
+                 dynamic_feature_cols, transform=None, task='regression'): 
+
         self.metadata = metadata_df.copy() # Use .copy() to avoid SettingWithCopyWarning
         self.cnn_dataset_dir = cnn_dataset_dir
         self.transform = transform
@@ -39,12 +39,10 @@ class AirflowSequenceDataset(Dataset):
         sequence = np.load(sequence_path).astype(np.float32)
 
         if sequence.ndim == 3: # This is for single-channel data (Seq, H, W)
-            # Just add the channel dimension. Do NOT normalize here.
             sequence = np.expand_dims(sequence, axis=1) # -> (Seq, 1, H, W)
         
-        # The PyTorch standard is (C, H, W). Our data is (Seq, ...).
-        # So we need to process frame by frame anyway.
-        # Let's handle the transpose inside the loop for clarity.
+        # The PyTorch standard is (C, H, W). 
+        # we need to process frame by frame anyway.
         # The input `sequence` is now either (Seq, 1, H, W) or (Seq, H, W, C)
 
         processed_frames = []

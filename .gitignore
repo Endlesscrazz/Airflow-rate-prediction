@@ -1,50 +1,75 @@
-# Ignore system and editor files
-.DS_Store
-.vscode/
+# =================================
+# General Python & System Files
+# =================================
+# Compiled Python files
+__pycache__/
+*.pyc
 
-# Ignore datasets and large directories
+# Distribution / packaging
+build/
+dist/
+eggs/
+*.egg-info/
+
+# Environment and Editor files
+.env
+.venv
+venv/
+env/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# =================================
+# Project-Specific Data & Large Files
+# =================================
+#
+# --- Raw and Processed Datasets ---
 datasets/
-dataset_new/
-dataset_cleaned/
-dataset_brickcladding/
-cnn_dataset[OLD]/
+cnn_dataset-old/
+masks_raw/
 CNN_dataset/
-CNN_Results/
+
 output_SAM/
-output_temp/
-output[OLD]/
+
+# --- Large Model Checkpoints ---
+SAM/
+
+# =================================
+# Experiment Outputs & Artifacts
+# =================================
+#
+# --- Trained Models ---
+trained_models/
+trained_models_final/
+trained_models_*_CV/
+
+# --- Results ---
+results_*_CV/
+CNN_Results/
+holdout_results/
+Reports/ 
+
+# --- Visualizations & Temporary Outputs ---
 verified_masks/
+visualizations/
+plots/
 debug_masks/
 hotspot_masks/
-visualized_thermal_data/
-output_new/
 
-# Ignore SAM related files
-SAM/sam_checkpoints/
-
-# Ignore trained models and architecture diagrams
-trained_models/
-mlp_architecture_diagram.png
-
-# Ignore reports and plots
-Reports/
-plots/
-feature_selection_rfecv_results*.png
-holdout_results_hybrid_plot.png
-
-# Ignore large video or result files
-*.mp4
-*.npy
-*.csv
-*.png
-*.jpg
-
-# Ignore temporary and unnecessary files
+# --- Logs ---
+# Ignore log files and SLURM output files.
+logs/
 *.log
-*.tmp
-*.bak
-*.swp
+*.out
 
-# # Make sure to track source code files (add the following if needed)
-# !src_feature_based/
-# !src_cnn/
+# --- Specific Generated Files ---
+master_features.csv
+
+# =================================
+# Archives
+# =================================
+#
+# Ignore the archive directory and its contents.
+archive/
