@@ -16,6 +16,7 @@ This script performs a one-time process to:
 3. Generate a single `metadata.csv` file that links each saved sequence to its label.
 """
 import os
+import datetime
 import sys
 import pandas as pd
 import numpy as np
@@ -30,8 +31,9 @@ from src_feature_based import data_utils
 from src_feature_based import feature_engineering
 
 # --- Configuration ---
-CNN_DATASET_DIR = "cnn_dataset/dataset_cnn-lstm-all-split-holes"
+CNN_DATASET_DIR = "cnn_dataset/dataset_cnn_lstm_flow"
 METADATA_SAVE_PATH = os.path.join(CNN_DATASET_DIR, "metadata.csv")
+DATASET_TYPE = "2-Channel optical flow"
 
 # ROI and Image Processing Parameters
 ROI_PADDING_PERCENT = 0.20
@@ -60,7 +62,57 @@ DATASET_CONFIGS = {
     "brick_cladding_single_hole": {"material": "brick_cladding", "dataset_subfolder": "dataset_brickcladding", "mask_subfolder": "dataset_brickcladding"},
     "brick_cladding_two_holes": {"material": "brick_cladding", "dataset_subfolder": "dataset_two_holes_brickcladding", "mask_subfolder": "dataset_two_holes_brickcladding"}
 }
+def save_dataset_parameters(output_dir, dataset_type, num_samples, final_df, context_cols, dynamic_cols):
+    """Saves the key parameters of the generated dataset to a text file."""
+    
+    # Infer image shape from a sample .npy file
+    try:
+        sample_path = os.path.join(output_dir, final_df['image_path'].iloc[0])
+        sample_array = np.load(sample_path)
+        # Shape is (Seq, H, W, C) or (Seq, H, W) -> we want C
+        if sample_array.ndim == 4:
+            num_channels = sample_array.shape[-1]
+            image_shape_str = f"{sample_array.shape[1]}x{sample_array.shape[2]}"
+            sequence_length = sample_array.shape[0]
+        elif sample_array.ndim == 3: # For single-channel thermal data
+            num_channels = 1
+            image_shape_str = f"{sample_array.shape[1]}x{sample_array.shape[2]}"
+            sequence_length = sample_array.shape[0]
+    except Exception as e:
+        num_channels = "N/A (Error reading sample)"
+        image_shape_str = "N/A"
+        sequence_length = "N/A"
+        print(f"Warning: Could not read sample file to determine shape. Error: {e}")
 
+
+    params = {
+        "Dataset Directory": output_dir,
+        "Dataset Type": dataset_type,
+        "Generation Timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "---": "---",
+        "Total Samples": num_samples,
+        "Sequence Length": sequence_length,
+        "Image Channels": num_channels,
+        "Image Target Size": image_shape_str,
+        "---": "---",
+        "Context Features": sorted(context_cols),
+        "Dynamic Features": sorted(dynamic_cols),
+        "---": "---",
+        "Handcrafted Features Used": sorted(list(set(SELECTED_RAW_FEATURES_TO_EXTRACT))),
+    }
+
+    save_path = os.path.join(output_dir, "dataset_parameters.txt")
+    with open(save_path, 'w') as f:
+        f.write("--- DATASET PARAMETERS ---\n\n")
+        for key, value in params.items():
+            if isinstance(value, list):
+                f.write(f"{key:<35}: \n")
+                for item in value:
+                    f.write(f"{'':<37}- {item}\n")
+            else:
+                f.write(f"{key:<35}: {value}\n")
+    
+    print(f"\nSuccessfully saved dataset parameters to: {save_path}")
 
 def create_cnn_dataset():
     """Main function to generate the CNN-ready dataset."""
@@ -344,9 +396,18 @@ def create_cnn_dataset():
         print(f"\nWarning: {len(failed_samples)} samples failed during processing.")
         for failed in failed_samples:
             print(f"  - ID: {failed['video_id']}, Reason: {failed['error']}")
+
+    save_dataset_parameters(
+        output_dir=CNN_DATASET_DIR,
+        dataset_type=DATASET_TYPE,
+        num_samples=len(final_df),
+        final_df=final_df,
+        context_cols=context_feature_cols,
+        dynamic_cols=dynamic_feature_cols
+    )
     print("\n--- CNN Dataset Creation Complete ---")
 
 if __name__ == "__main__":
     create_cnn_dataset()
 
-# python -m src_cnn.create_cnn_dataset
+# python -m src_cnn.create_op_flow_dataset

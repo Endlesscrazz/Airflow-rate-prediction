@@ -1,11 +1,50 @@
-datasets/*
+# Ignore system and editor files
+.DS_Store
+.vscode/
+
+# Ignore datasets and large directories
+datasets/
 dataset_new/
-output_new/
 dataset_cleaned/
 dataset_brickcladding/
+cnn_dataset[OLD]/
+CNN_dataset/
+CNN_Results/
+output_SAM/
+output_temp/
+output[OLD]/
+verified_masks/
+debug_masks/
+hotspot_masks/
+visualized_thermal_data/
+output_new/
+
+# Ignore SAM related files
 SAM/sam_checkpoints/
-cnn_dataset/*
-verified_masks/*
-CNN_Results/*
-output_temp/*
-output_SAM/*
+
+# Ignore trained models and architecture diagrams
+trained_models/
+mlp_architecture_diagram.png
+
+# Ignore reports and plots
+Reports/
+plots/
+feature_selection_rfecv_results*.png
+holdout_results_hybrid_plot.png
+
+# Ignore large video or result files
+*.mp4
+*.npy
+*.csv
+*.png
+*.jpg
+
+# Ignore temporary and unnecessary files
+*.log
+*.tmp
+*.bak
+*.swp
+
+# # Make sure to track source code files (add the following if needed)
+# !src_feature_based/
+# !src_cnn/

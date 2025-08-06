@@ -22,19 +22,22 @@ import sys
 # Import our custom modules
 from src_cnn.cnn_utils import AirflowSequenceDataset
 #from src_cnn.cnn_models import CnnLstmRegressor
-from src_cnn.cnn_models import UltimateHybridRegressor
+from src_cnn.cnn_models import UltimateHybridRegressor,SimplifiedCnnAvgRegressor
 
 # --- Configuration ---
-CNN_DATASET_DIR = "cnn_dataset/dataset_cnn-lstm-all-split-holes"
+CNN_DATASET_DIR = "CNN_dataset/dataset_1ch_thermal"
 METADATA_PATH = os.path.join(CNN_DATASET_DIR, "metadata.csv")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 RANDOM_STATE = 42
 
 # Training Hyperparameters
 BATCH_SIZE = 8
-LEARNING_RATE = 3e-4  # A higher LR is suitable as we only train the LSTM/head
+# LEARNING_RATE = 3e-4      # Original value
+# WEIGHT_DECAY = 1e-5       # Original value
+# ---OPTUNA UPDATE ---
+LEARNING_RATE = 0.000242  # From Optuna
 NUM_EPOCHS = 150
-WEIGHT_DECAY = 1e-5
+WEIGHT_DECAY = 0.000289  # From Optuna
 
 # Output Directories
 MODEL_SAVE_DIR = "trained_models_hybrid_CV"
@@ -101,26 +104,46 @@ def evaluate(model, dataloader, criterion, device):
 # --- Main Execution ---
 
 def main():
-    # Argument Parser
-    parser = argparse.ArgumentParser(description="Train CNN+LSTM model for a specific CV fold.")
+    # 1. Setup & Parse Arguments
+    parser = argparse.ArgumentParser(description="Train CNN-based models for a specific CV fold.")
     parser.add_argument("--fold", type=int, required=True, help="The fold number to run (0-indexed).")
     parser.add_argument("--total_folds", type=int, required=True, help="The total number of folds in the CV.")
+    parser.add_argument("--model_type", type=str, required=True, choices=['lstm', 'avg'], 
+                        help="Type of model to train: 'lstm' for UltimateHybrid or 'avg' for SimplifiedCnnAvg.")
+    parser.add_argument("--dataset_dir", type=str, required=True, 
+                        help="Path to the root directory of the dataset.")
+    parser.add_argument("--in_channels", type=int, required=True, 
+                        help="Number of input channels for the CNN (1, 2, or 3).")
     args = parser.parse_args()
 
     current_fold = args.fold
     n_splits = args.total_folds
     is_interactive = sys.stdout.isatty()
 
-    print(f"--- Starting CNN+LSTM Model Training for FOLD {current_fold + 1}/{n_splits} ---")
+    # 2. Configure Paths and Logging
+    CNN_DATASET_DIR = args.dataset_dir
+    METADATA_PATH = os.path.join(CNN_DATASET_DIR, "metadata.csv") 
+
+    model_name_tag = f"{args.model_type}_{args.in_channels}ch"
+    MODEL_SAVE_DIR = f"trained_models_{model_name_tag}_CV"
+    RESULTS_SAVE_DIR = f"results_{model_name_tag}_CV"
+
+    # --- FIX: Cleaned up print statements ---
+    print(f"--- Starting CNN-based Model Training ---")
+    print(f"Model Type: {args.model_type.upper()} | Fold: {current_fold + 1}/{n_splits} | Channels: {args.in_channels}")
+    print(f"Dataset: {CNN_DATASET_DIR}")
     print(f"Using device: {DEVICE.upper()}")
 
-    # 1. Load Data
+    # 3. Load Data
+    if not os.path.exists(METADATA_PATH):
+        print(f"FATAL ERROR: Metadata file not found at {METADATA_PATH}")
+        sys.exit(1)
     df_metadata = pd.read_csv(METADATA_PATH)
     X = df_metadata.drop("airflow_rate", axis=1)
     y = df_metadata["airflow_rate"]
     groups = df_metadata["video_id"]
 
-    # 2. Setup Cross-Validation
+    # 4. Setup Cross-Validation
     gkf = GroupKFold(n_splits=n_splits)
     train_idx, val_idx = list(gkf.split(X, y, groups))[current_fold]
 
@@ -130,28 +153,28 @@ def main():
     train_df = df_metadata.iloc[train_idx]
     val_df = df_metadata.iloc[val_idx]
 
-    # --- Data Transforms ---
-    # Add augmentation for the training set to combat overfitting
+    # 5. Data Transforms and Loaders
+    if args.in_channels == 1:
+        NORM_MEAN = [0.5]
+        NORM_STD = [0.5]
+    elif args.in_channels == 2:
+        NORM_MEAN = [0.0, 0.0]
+        NORM_STD = [1.0, 1.0]
+    elif args.in_channels == 3:
+        NORM_MEAN = [0.5, 0.0, 0.0]
+        NORM_STD = [0.5, 1.0, 1.0]
+    else:
+        raise ValueError(f"Unsupported number of channels: {args.in_channels}")
+
     train_transform = transforms.Compose([
-    # The dataset outputs tensors in [0, 1] range.
-    transforms.RandomHorizontalFlip(p=0.5),
-    transforms.RandomRotation(15),
-    # Add jitter to simulate thermal variations
-    transforms.ColorJitter(brightness=0.2, contrast=0.2),
-    # Add a bit of noise
-    transforms.Lambda(lambda x: x + 0.01 * torch.randn_like(x)),
-    # Erase a random patch to force learning from context
-    transforms.RandomErasing(p=0.2, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=0),
-    # Final normalization for the model
-    transforms.Normalize(mean=[0.5], std=[0.5])
-])
-    
-    # Validation set only gets normalization
+        transforms.Lambda(lambda x: x + 0.05 * torch.randn_like(x)),
+        transforms.RandomErasing(p=0.25, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=0),
+        transforms.Normalize(mean=NORM_MEAN, std=NORM_STD)
+    ])
     val_transform = transforms.Compose([
-        transforms.Normalize(mean=[0.5], std=[0.5])
+        transforms.Normalize(mean=NORM_MEAN, std=NORM_STD)
     ])
     
-    # Create Datasets with appropriate transforms
     train_dataset = AirflowSequenceDataset(train_df, CNN_DATASET_DIR, 
                                            context_feature_cols=CONTEXT_FEATURES,
                                            dynamic_feature_cols=DYNAMIC_FEATURES,
@@ -163,53 +186,62 @@ def main():
     
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
+    
+    # 6. Initialize Model, Loss, and Optimizer
+    if args.model_type == 'lstm':
+        model = UltimateHybridRegressor(
+            num_context_features=len(CONTEXT_FEATURES),
+            num_dynamic_features=len(DYNAMIC_FEATURES),
+            cnn_in_channels=args.in_channels,
+            lstm_hidden_size=512,  # From Optuna
+            lstm_layers=3          # From Optuna
+            # lstm_hidden_size=256,  # Original value
+            # lstm_layers=3          # Original value
+        ).to(DEVICE)
 
-    # 3. Initialize Model, Loss, and Optimizer
-    model = UltimateHybridRegressor(
-        num_context_features=len(CONTEXT_FEATURES),
-        num_dynamic_features=len(DYNAMIC_FEATURES)
-    ).to(DEVICE)
+        #model.head[2] = torch.nn.Dropout(0.6) # Original value
+        model.head[2] = torch.nn.Dropout(0.309)
+    elif args.model_type == 'avg':
+        model = SimplifiedCnnAvgRegressor(
+            num_context_features=len(CONTEXT_FEATURES),
+            num_dynamic_features=len(DYNAMIC_FEATURES),
+            cnn_in_channels=args.in_channels
+        ).to(DEVICE)
+    else:
+        raise ValueError(f"Unknown model_type: {args.model_type}")
+
+    print(f"Initialized {type(model).__name__} with {args.in_channels} input channels.")
     
     criterion = nn.MSELoss()
-    # Group 1: The newly unfrozen CNN layers (fine-tuning with a small LR)
-    cnn_finetune_params = model.cnn[7].parameters()
-
-    # Group 2: All other trainable parts of the model (LSTM and MLPs)
-    main_model_params = itertools.chain(
-        model.lstm.parameters(),
-        model.context_mlp.parameters(),
-        model.dynamic_mlp.parameters(),
-        model.head.parameters(),
-        model.attention.parameters()
-    )
-
-    optimizer = optim.AdamW([
-        {'params': cnn_finetune_params, 'lr': LEARNING_RATE / 10}, # e.g., 3e-5
-        {'params': main_model_params, 'lr': LEARNING_RATE}         # e.g., 3e-4
-    ], weight_decay=WEIGHT_DECAY)
-
-    # --- END OF CHANGE ---
+    
+    param_groups = [{'params': model.cnn[7].parameters(), 'lr': LEARNING_RATE / 10}]
+    if args.model_type == 'lstm':
+        main_model_params = itertools.chain(model.lstm.parameters(), model.attention.parameters())
+        param_groups.append({'params': main_model_params, 'lr': LEARNING_RATE})
+    shared_main_params = itertools.chain(model.context_mlp.parameters(), model.dynamic_mlp.parameters(), model.head.parameters())
+    param_groups.append({'params': shared_main_params, 'lr': LEARNING_RATE})
+    optimizer = optim.AdamW(param_groups, weight_decay=WEIGHT_DECAY)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=10)
     best_val_r2 = -float('inf')
     model_save_path = os.path.join(MODEL_SAVE_DIR, f"best_model_fold_{current_fold}.pth")
     os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
-    # 4. Single, Continuous Training Loop
+    # 7. Training Loop
     for epoch in tqdm(range(NUM_EPOCHS), desc=f"Training Fold {current_fold+1}", disable=(not is_interactive)):
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, DEVICE)
         val_loss, val_r2, val_rmse = evaluate(model, val_loader, criterion, DEVICE)
         scheduler.step(val_loss)
 
         if (epoch + 1) % 5 == 0 or epoch == 0:
-             current_lr = optimizer.param_groups[0]['lr']
+             current_lr = optimizer.param_groups[-1]['lr']
              tqdm.write(f"Epoch {epoch+1:02d}/{NUM_EPOCHS} | Train Loss: {train_loss:.4f} | Val R²: {val_r2:.4f} | LR: {current_lr:.1e}")
 
         if val_r2 > best_val_r2:
             best_val_r2 = val_r2
             torch.save(model.state_dict(), model_save_path)
 
-    # 5. Report Final Results for this Fold
+    # 8. Report Final Results for this Fold
     print(f"\n----- Finished Fold {current_fold + 1} -----")
     print(f"Loading best model from: {model_save_path}")
     model.load_state_dict(torch.load(model_save_path))

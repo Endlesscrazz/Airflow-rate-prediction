@@ -2,7 +2,7 @@ import pandas as pd
 import os
 
 N_SPLITS = 5
-RESULTS_DIR = "results_cnn_lstm_hybrid"
+RESULTS_DIR = "results_lstm_1ch_CV"
 
 all_dfs = []
 for i in range(N_SPLITS):

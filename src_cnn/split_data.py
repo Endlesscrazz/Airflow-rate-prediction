@@ -13,12 +13,12 @@ import os
 import numpy as np
 
 # --- Configuration ---
-CNN_DATASET_DIR = "cnn_dataset/dataset_cnn-lstm-all-split-holes"
+CNN_DATASET_DIR = "CNN_dataset/dataset_1ch_thermal"
 METADATA_PATH = os.path.join(CNN_DATASET_DIR, "metadata.csv")
 TRAIN_METADATA_PATH = os.path.join(CNN_DATASET_DIR, "train_metadata.csv")
 HOLDOUT_METADATA_PATH = os.path.join(CNN_DATASET_DIR, "holdout_metadata.csv")
 HOLDOUT_SIZE = 0.2
-RANDOM_STATE = 44 # A fixed seed for reproducibility
+RANDOM_STATE = 42 # A fixed seed for reproducibility
 
 def main():
     print("--- Creating STRATIFIED Train/Hold-Out Split with Verification ---")

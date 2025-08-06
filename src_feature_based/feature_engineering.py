@@ -14,7 +14,7 @@ from scipy.stats import linregress, skew, kurtosis, mstats
 import warnings
 import traceback
 
-# --- SINGLE SOURCE OF TRUTH FOR ALL FEATURE NAMES ---
+
 ALL_POSSIBLE_FEATURE_NAMES = [
     'hotspot_area', 'hotspot_avg_temp_change_rate_initial', 'hotspot_avg_temp_change_magnitude_initial',
     'peak_pixel_temp_change_rate_initial', 'peak_pixel_temp_change_magnitude_initial', 'temp_mean_avg_initial',
@@ -25,10 +25,9 @@ ALL_POSSIBLE_FEATURE_NAMES = [
     'num_hotspots', 'hotspot_solidity', 'centroid_distance', 'time_to_peak_mean_temp',
     'temperature_skewness', 'temperature_kurtosis', 'rate_of_std_change_initial', 'peak_to_average_ratio',
     'radial_profile_0', 'radial_profile_1', 'radial_profile_2', 'radial_profile_3', 'radial_profile_4',
-    'bbox_area', 'bbox_aspect_ratio' # Added bbox features if you want them
+    'bbox_area', 'bbox_aspect_ratio' 
 ]
 
-# --- RADIAL PROFILE FEATURE FUNCTION (No changes needed here) ---
 def calculate_radial_profile(frame_data, mask, center_y, center_x, num_bins=5, max_radius=None):
 
     H, W = frame_data.shape
@@ -82,19 +81,19 @@ def calculate_hotspot_features(
     # Initialize M, cX, cY to safe defaults outside the try block
     M = None
     cX, cY = np.nan, np.nan
-    all_points_in_contours = None # Initialize for bounding box too
+    all_points_in_contours = None 
 
     try:
         contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if contours: # Proceed only if contours are found
+        if contours: 
             M = cv2.moments(mask_uint8) # Calculate moments of the entire mask
-            if M["m00"] != 0: # Ensure denominator is not zero
+            if M["m00"] != 0: 
                 cX = int(M["m10"] / M["m00"])
                 cY = int(M["m01"] / M["m00"])
-            else: # If m00 is zero, centroid is undefined
+            else: 
                 cX, cY = np.nan, np.nan
             
-            all_points_in_contours = np.concatenate(contours, axis=0) # Use this for overall geometry
+            all_points_in_contours = np.concatenate(contours, axis=0) 
             
             # Solidity
             hull = cv2.convexHull(all_points_in_contours)
@@ -103,13 +102,12 @@ def calculate_hotspot_features(
                 features['hotspot_solidity'] = features['hotspot_area'] / hull_area
 
             # Centroid Distance (only for 2 holes)
-            if features['num_hotspots'] == 2 and len(centroids) > 2: # Ensure enough centroids for 2 holes
+            if features['num_hotspots'] == 2 and len(centroids) > 2: 
                 p1, p2 = centroids[1], centroids[2] 
                 features['centroid_distance'] = np.sqrt(np.sum((p1 - p2)**2))
             else:
                 features['centroid_distance'] = 0 
                 
-            # Bounding Box features for the entire masked region (UNCOMMENTED)
             x_bbox, y_bbox, w_bbox, h_bbox = cv2.boundingRect(all_points_in_contours)
             features['bbox_area'] = w_bbox * h_bbox
             if h_bbox > 0: features['bbox_aspect_ratio'] = w_bbox / h_bbox
@@ -130,7 +128,7 @@ def calculate_hotspot_features(
     else: # If centroid or moments were invalid, set radial features to NaN
         for i in range(5): features[f'radial_profile_{i}'] = np.nan
 
-    # --- 2. Initial Features (Focus Duration) - REORDERED LOGIC (Already fixed) ---
+    # --- 2. Initial Features (Focus Duration) 
     actual_focus_frames = min(focus_duration_frames, N_total)
     if actual_focus_frames >= 2:
         frames_focus = frames[:, :, :actual_focus_frames]
@@ -195,7 +193,7 @@ def calculate_hotspot_features(
                 print(f"Warning: Initial feature calculation failed: {e}")
                 traceback.print_exc()
 
-    # --- 3. Full Duration Features --- (Corrected and streamlined)
+    # --- 3. Full Duration Features --- 
     try:
         initial_frame_val = frames[hotspot_mask, 0].mean() # Use average initial temp in mask
         if not np.isfinite(initial_frame_val): raise ValueError("Invalid initial frame temp")

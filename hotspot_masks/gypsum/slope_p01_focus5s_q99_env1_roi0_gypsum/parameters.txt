@@ -1,8 +1,0 @@
---- Mask Generation Run Parameters ---
-  Dataset: /Users/shreyas/Desktop/UoU/Independent-Study/Airflow-rate-prediction/dataset_cleaned
-  Output Masks: hotspot_masks/slope_p01_focus5s_q99_env1_roi0
-  MAT Key: TempFrames, FPS: 5.0
-  Slope Calc: Focus=5.0s, SmoothWin=1, P-Thresh=0.1, Envir=1, Augment=1.0
-  Frame Preproc: NormalizeT=False, FuseLevel=0
-  ROI Border: 0.0%
-  Extraction: Quantile=0.990, MorphOp=none, BlurActivityMap=False (Kernel: (3, 3))

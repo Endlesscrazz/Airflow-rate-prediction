@@ -1,6 +1,0 @@
-  Dataset: /Users/shreyas/Desktop/UoU/Independent-Study/Airflow-rate-prediction/datasets, Output Masks: hotspot_masks/SP_Blur3_slope_p01_focus5s_q98_env1_roi0_mpOpenClose, MAT Key: TempFrames
-  Slope Input Preproc: SpatialBlurKsize=3, SubtractPixelMean=True
-  Slope Calc: FPS=5.0, Focus=5.0s, TemporalSmoothWin=1, P-Thresh=0.100, Envir=1, Augment=1.0
-  General Frame Preproc: NormalizeT(FrameWise)=False, FuseLevel(BoxFilter)=0
-  ROI Border: 10.0%
-  Extraction: Quantile=0.990, MorphOp=open_close, BlurActivityMap=False (Kernel: (3, 3))

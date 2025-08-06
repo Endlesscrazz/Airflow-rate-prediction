@@ -1,6 +1,7 @@
 # src_cnn/evaluate_holdout.py
 """
-Evaluates the final trained "Ultimate Hybrid" model on the unseen hold-out set.
+Evaluates a final trained model on the unseen hold-out set.
+This script is made flexible to evaluate any specified model on any specified dataset.
 """
 import os
 import numpy as np
@@ -11,18 +12,18 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from sklearn.metrics import r2_score, mean_squared_error
+import sys
+import argparse
 
+# Import our custom modules
 from src_cnn.cnn_utils import AirflowSequenceDataset
-from src_cnn.cnn_models import UltimateHybridRegressor # <-- Use the correct model
+from src_cnn.cnn_models import UltimateHybridRegressor, SimplifiedCnnAvgRegressor
 
-# --- Configuration ---
-CNN_DATASET_DIR = "cnn_dataset/dataset_cnn-lstm-all-split-holes" # <-- Use the correct dataset
-HOLDOUT_METADATA_PATH = os.path.join(CNN_DATASET_DIR, "holdout_metadata.csv")
-MODEL_PATH = "trained_models_hybrid_final/final_model.pth" # <-- Correct model path
+# --- Default Configuration ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 BATCH_SIZE = 8
 
-# Define the feature sets to be loaded by the Dataset
+# Feature Lists
 CONTEXT_FEATURES = [
     'delta_T_log',
     'material_brick_cladding',
@@ -37,38 +38,95 @@ DYNAMIC_FEATURES = [
 ]
 
 def main():
-    print("--- Evaluating Final Hybrid Model on Hold-Out Set ---")
+    # 1. Setup & Parse Arguments
+    parser = argparse.ArgumentParser(description="Evaluate a final model on the hold-out dataset.")
+    parser.add_argument("--model_type", type=str, required=True, choices=['lstm', 'avg'],
+                        help="The type of model to evaluate ('lstm' or 'avg').")
+    parser.add_argument("--dataset_dir", type=str, required=True,
+                        help="Path to the root directory of the dataset used for training.")
+    parser.add_argument("--in_channels", type=int, required=True,
+                        help="The number of input channels the model was trained with (1, 2, or 3).")
+    # --- START OF NEW ARGUMENT ---
+    parser.add_argument("--optuna_tuned", action='store_true',
+                        help="Specify if loading a model that was tuned with Optuna.")
+    # --- END OF NEW ARGUMENT ---
+    args = parser.parse_args()
+
+    # 2. Configure Paths and Logging
+    CNN_DATASET_DIR = args.dataset_dir
+    HOLDOUT_METADATA_PATH = os.path.join(CNN_DATASET_DIR, "holdout_metadata.csv") 
     
-    # 1. Load Hold-Out Data
+    # --- START OF PATH FIX ---
+    # Dynamically create the model name tag
+    model_name_tag = f"{args.model_type}_{args.in_channels}ch"
+    if args.optuna_tuned:
+        model_name_tag += "_optuna"
+    MODEL_PATH = f"trained_models_final/final_model_{model_name_tag}.pth"
+    # --- END OF PATH FIX ---
+    
+    print("--- Evaluating Final Model on Hold-Out Set ---")
+    print(f"Model Type: {args.model_type.upper()} | Channels: {args.in_channels} | Tuned: {args.optuna_tuned}")
+    print(f"Dataset: {CNN_DATASET_DIR}")
+    print(f"Loading model from: {MODEL_PATH}")
+
+    # 3. Load Hold-Out Data
+    if not os.path.isfile(HOLDOUT_METADATA_PATH):
+        print(f"FATAL ERROR: Hold-out metadata not found at '{HOLDOUT_METADATA_PATH}'")
+        sys.exit(1)
     holdout_df = pd.read_csv(HOLDOUT_METADATA_PATH)
     
-    # Apply the same normalization as used in training (NO augmentation)
-    val_transform = transforms.Compose([
-        transforms.Normalize(mean=[0.5], std=[0.5])
-    ])
+    if args.in_channels == 1:
+        NORM_MEAN, NORM_STD = [0.5], [0.5]
+    elif args.in_channels == 2:
+        NORM_MEAN, NORM_STD = [0.0, 0.0], [1.0, 1.0]
+    elif args.in_channels == 3:
+        NORM_MEAN, NORM_STD = [0.5, 0.0, 0.0], [0.5, 1.0, 1.0]
+    else:
+        raise ValueError(f"Unsupported number of channels: {args.in_channels}")
+
+    val_transform = transforms.Compose([transforms.Normalize(mean=NORM_MEAN, std=NORM_STD)])
     
-    # Pass the feature lists to the Dataset
-    holdout_dataset = AirflowSequenceDataset(
-        holdout_df, 
-        CNN_DATASET_DIR, 
-        context_feature_cols=CONTEXT_FEATURES,
-        dynamic_feature_cols=DYNAMIC_FEATURES,
-        transform=val_transform
-    )
+    holdout_dataset = AirflowSequenceDataset(holdout_df, CNN_DATASET_DIR, CONTEXT_FEATURES, DYNAMIC_FEATURES, val_transform)
     holdout_loader = DataLoader(holdout_dataset, batch_size=BATCH_SIZE, shuffle=False)
     
-    # 2. Load the Trained Model
-    model = UltimateHybridRegressor(
-        num_context_features=len(CONTEXT_FEATURES),
-        num_dynamic_features=len(DYNAMIC_FEATURES)
-    )
+    # 4. Load the Trained Model
+    # --- START OF MODEL INITIALIZATION FIX ---
+    if args.model_type == 'lstm':
+        if args.optuna_tuned:
+            # Use the Optuna-tuned architecture
+            model = UltimateHybridRegressor(
+                num_context_features=len(CONTEXT_FEATURES),
+                num_dynamic_features=len(DYNAMIC_FEATURES),
+                cnn_in_channels=args.in_channels,
+                lstm_hidden_size=512,
+                lstm_layers=3
+            )
+            # The dropout rate must also be set correctly before loading weights
+            model.head[2] = torch.nn.Dropout(0.309)
+        else:
+            # Use the original, default architecture
+            model = UltimateHybridRegressor(
+                num_context_features=len(CONTEXT_FEATURES),
+                num_dynamic_features=len(DYNAMIC_FEATURES),
+                cnn_in_channels=args.in_channels
+            )
+    elif args.model_type == 'avg':
+        model = SimplifiedCnnAvgRegressor(...) # Unchanged
+    else:
+        raise ValueError(f"Unknown model_type: {args.model_type}")
+    # --- END OF MODEL INITIALIZATION FIX ---
+
+    if not os.path.isfile(MODEL_PATH):
+        print(f"FATAL ERROR: Model file not found at '{MODEL_PATH}'")
+        sys.exit(1)
+        
     model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
     model.to(DEVICE)
     model.eval()
 
-    # 3. Get Predictions
-    all_targets = []
-    all_outputs = []
+    # ... (Rest of the script is unchanged) ...
+    # 5. Get Predictions
+    all_targets, all_outputs = [], []
     with torch.no_grad():
         for seq, context, dynamic, targets in tqdm(holdout_loader, desc="Predicting"):
             seq, context, dynamic = seq.to(DEVICE), context.to(DEVICE), dynamic.to(DEVICE)
@@ -76,7 +134,7 @@ def main():
             all_targets.extend(targets.numpy())
             all_outputs.extend(outputs.cpu().numpy())
 
-    # 4. Calculate and Print Metrics
+    # 6. Calculate and Print Metrics
     r2 = r2_score(all_targets, all_outputs)
     rmse = np.sqrt(mean_squared_error(all_targets, all_outputs))
     
@@ -84,22 +142,31 @@ def main():
     print(f"R-squared (R²): {r2:.4f}")
     print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
 
-    # 5. Generate and Save Visualization
+    # 7. Generate and Save Visualization
     plt.figure(figsize=(8, 8))
     plt.scatter(all_targets, all_outputs, alpha=0.6, edgecolors='k')
-    plt.plot([min(all_targets), max(all_targets)], [min(all_targets), max(all_targets)], 'r--', lw=2, label='Perfect Prediction')
+    min_val = min(min(all_targets), min(all_outputs))
+    max_val = max(max(all_targets), max(all_outputs))
+    plt.plot([min_val, max_val], [min_val, max_val], 'r--', lw=2, label='Perfect Prediction')
     plt.xlabel("True Airflow Rate")
     plt.ylabel("Predicted Airflow Rate")
     plt.title(f"Hold-Out Set: True vs. Predicted (R² = {r2:.4f})")
     plt.legend()
     plt.grid(True)
     
-    plot_save_path = "holdout_results_hybrid_plot.png"
+    plot_save_dir = "holdout_results"
+    os.makedirs(plot_save_dir, exist_ok=True)
+    plot_save_path = os.path.join(plot_save_dir, f"holdout_plot_{model_name_tag}.png")
     plt.savefig(plot_save_path)
     print(f"\nSaved results plot to: {plot_save_path}")
-    plt.show()
 
 if __name__ == "__main__":
     main()
 
-# python -m src_cnn.evaluate_holdout
+"""
+python -m src_cnn.evaluate_holdout \
+    --model_type "lstm" \
+    --dataset_dir "CNN_dataset/dataset_1ch_thermal" \
+    --in_channels 1 \
+    --optuna_tuned 
+"""
