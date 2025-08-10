@@ -19,8 +19,8 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
 # --- Import Your Project Modules ---
-from src_cnn import config as cfg
-from scripts import data_utils, feature_engineering
+from src_cnn import config as cfg, feature_engineering
+from archive.old_cnn_scripts import data_utils
 
 # --- Configuration for this script ---
 # We will override the config to ensure ALL features are calculated

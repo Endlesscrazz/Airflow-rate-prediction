@@ -7,8 +7,8 @@ All configurations are imported from src_cnn.config.
 Run using:
 python -m scripts.create_dataset --type [thermal|flow|hybrid]
 """
-from scripts import feature_engineering
-from scripts import data_utils
+from src_cnn import feature_engineering
+from src_cnn import data_utils
 from src_cnn import config as cfg
 import os
 import sys
@@ -21,8 +21,6 @@ from tqdm import tqdm
 import datetime
 import argparse
 
-# --- Import project modules ---
-# Add the project root to the Python path to allow absolute imports
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
@@ -62,78 +60,74 @@ def create_dataset(dataset_type):
     FOCUS_DURATION_FRAMES = int(cfg.FOCUS_DURATION_SECONDS * cfg.TRUE_FPS)
 
     if dataset_type == 'thermal':
-        output_dir = os.path.join(
-            cfg.PROCESSED_DATASET_DIR, "dataset_1ch_thermal")
-        DATASET_TYPE_STR = "1-Channel Thermal"
+        output_dir = os.path.join(cfg.PROCESSED_DATASET_DIR, "dataset_1ch_thermal_hard_crop")
+        DATASET_TYPE_STR = "1-Channel Thermal (Hard Crop)"
+    elif dataset_type == 'thermal_masked':
+        output_dir = os.path.join(cfg.PROCESSED_DATASET_DIR, "dataset_2ch_thermal_masked")
+        DATASET_TYPE_STR = "2-Channel Thermal + Mask"
     elif dataset_type == 'flow':
-        output_dir = os.path.join(
-            cfg.PROCESSED_DATASET_DIR, "dataset_2ch_flow")
+        output_dir = os.path.join(cfg.PROCESSED_DATASET_DIR, "dataset_2ch_flow_hard_crop")
         DATASET_TYPE_STR = "2-Channel Optical Flow"
     elif dataset_type == 'hybrid':
-        output_dir = os.path.join(
-            cfg.PROCESSED_DATASET_DIR, "dataset_3ch_hybrid")
-        DATASET_TYPE_STR = "3-Channel Hybrid (Thermal + Flow)"
+        output_dir = os.path.join(cfg.PROCESSED_DATASET_DIR, "dataset_3ch_hybrid_hard_crop")
+        DATASET_TYPE_STR = "3-Channel Hybrid"
     else:
-        raise ValueError("Invalid dataset type specified.")
+        raise ValueError(f"Invalid dataset type: {dataset_type}")
 
     METADATA_SAVE_PATH = os.path.join(output_dir, "metadata.csv")
+    
     print(f"--- Starting Dataset Creation: {DATASET_TYPE_STR} ---")
-    os.makedirs(output_dir, exist_ok=True)
-    print(f"Output will be saved in: {output_dir}")
+    
+    # 1. Load Ground Truth Airflow Data
+    try:
+        airflow_map = data_utils.load_airflow_from_csv(cfg.GROUND_TRUTH_CSV_PATH)
+        print(f"Loaded {len(airflow_map)} ground truth entries from {cfg.GROUND_TRUTH_CSV_PATH}")
+    except Exception as e:
+        print(f"Could not load or parse ground truth CSV. Aborting. Error: {e}")
+        return
 
-    print("\nStep 1: Scanning for all video and mask files...")
+    # 2. Scan for video and mask files
+    print("\nScanning for all video and mask files...")
     video_to_masks_map = {}
     for d_key, d_conf in cfg.DATASET_CONFIGS.items():
-        dataset_path_load = os.path.join(
-            cfg.RAW_DATASET_PARENT_DIR, d_conf["dataset_subfolder"])
-        mask_root_path_load = os.path.join(
-            cfg.RAW_MASK_PARENT_DIR, d_conf["mask_subfolder"])
-        if not os.path.isdir(dataset_path_load) or not os.path.isdir(mask_root_path_load):
-            print(f"  -> WARNING: Path not found for '{d_key}'. Skipping.")
+        dataset_path_load = os.path.join(cfg.RAW_DATASET_PARENT_DIR, d_conf["dataset_subfolder"])
+        if not os.path.isdir(dataset_path_load):
+            print(f"  -> WARNING: Data path not found for '{d_key}'. Skipping.")
             continue
-
+        
         for root_load, _, files_load in os.walk(dataset_path_load):
             for mat_filename_load in fnmatch.filter(files_load, '*.mat'):
+                # Link video to ground truth via voltage parsed from filename
+                voltage = data_utils.parse_voltage_from_filename(mat_filename_load)
+                if voltage is None or voltage not in airflow_map:
+                    continue
+                
                 mat_filepath_load = os.path.join(root_load, mat_filename_load)
                 video_id = os.path.splitext(mat_filename_load)[0]
+                
                 if video_id not in video_to_masks_map:
                     try:
-                        folder_name_load = os.path.basename(
-                            os.path.dirname(mat_filepath_load))
-                        airflow_load = data_utils.parse_airflow_rate(
-                            folder_name_load)
-                        delta_t_load = data_utils.parse_delta_T(
-                            mat_filename_load)
-                        if delta_t_load is None:
-                            continue
+                        airflow_rate = airflow_map[voltage]
+                        delta_t_load = data_utils.parse_delta_T(mat_filename_load)
+                        if delta_t_load is None: continue
+
                         video_to_masks_map[video_id] = {
                             "video_id": video_id, "mat_filepath": mat_filepath_load, "mask_paths": [],
-                            "delta_T": float(delta_t_load), "airflow_rate": float(airflow_load),
-                            "material": d_conf["material"], "source_dataset": d_key
+                            "delta_T": float(delta_t_load), "airflow_rate": float(airflow_rate),
+                            "material": d_conf["material"], "source_dataset": d_conf["dataset_subfolder"]
                         }
-                    except Exception:
+                    except Exception as e:
+                        print(f"Error processing metadata for {mat_filename_load}: {e}")
                         continue
-
-                mat_basename = os.path.splitext(mat_filename_load)[0]
-                relative_path_part = os.path.relpath(
-                    root_load, dataset_path_load)
-                mask_search_dir = os.path.join(
-                    mask_root_path_load, relative_path_part, mat_basename)
+                
+                # New mask finding logic
+                mask_search_dir = os.path.join(cfg.RAW_MASK_PARENT_DIR, d_conf["dataset_subfolder"], video_id)
                 if os.path.isdir(mask_search_dir):
-                    mask_files_found = fnmatch.filter(os.listdir(
-                        mask_search_dir), f"{mat_basename}_mask_*.npy")
-                    mask_files_found.extend(fnmatch.filter(os.listdir(
-                        mask_search_dir), f"{mat_basename}_sam_mask.npy"))
-                    if mask_files_found and video_id in video_to_masks_map:
-                        for mask_filename in mask_files_found:
-                            full_mask_path = os.path.join(
-                                mask_search_dir, mask_filename)
-                            if full_mask_path not in video_to_masks_map[video_id]["mask_paths"]:
-                                video_to_masks_map[video_id]["mask_paths"].append(
-                                    full_mask_path)
-
-    all_samples_info_list = [
-        v_data for v_data in video_to_masks_map.values() if v_data.get("mask_paths")]
+                    mask_files = fnmatch.filter(os.listdir(mask_search_dir), "*.npy")
+                    if mask_files:
+                        video_to_masks_map[video_id]["mask_paths"].extend([os.path.join(mask_search_dir, mf) for mf in mask_files])
+    
+    all_samples_info_list = [v for v in video_to_masks_map.values() if v.get("mask_paths")]
     if not all_samples_info_list:
         print("\nError: No samples found. Exiting.")
         return
@@ -176,51 +170,57 @@ def create_dataset(dataset_type):
                 raise ValueError("No valid masks found")
 
             for i, individual_mask in enumerate(masks_to_process):
-                if np.sum(individual_mask) == 0:
-                    continue
+                if not np.any(individual_mask): continue
 
                 original_video_id = sample_info['video_id']
                 new_video_id = f"{original_video_id}_hole_{i}" if is_two_hole_video else original_video_id
-                x, y, w, h = cv2.boundingRect(individual_mask.astype(np.uint8))
-                pad_w = int(w * cfg.ROI_PADDING_PERCENT / 2)
-                pad_h = int(h * cfg.ROI_PADDING_PERCENT / 2)
-                x1, y1 = max(0, x - pad_w), max(0, y - pad_h)
-                x2, y2 = min(W, x + w + pad_w), min(H, y + h + pad_h)
-                cropped_rois = selected_frames[y1:y2, x1:x2, :]
-
+                
                 processed_frames_list = []
-                if dataset_type == 'thermal':
+                
+                
+                if dataset_type == 'thermal_masked':
+                    # NEW LOGIC: Use full frame and add mask as a channel
                     for frame_idx in range(cfg.NUM_FRAMES_PER_SAMPLE):
-                        frame_patch = cropped_rois[:, :, frame_idx]
-                        if frame_patch.size == 0:
-                            continue
-                        resized = cv2.resize(
-                            frame_patch, cfg.IMAGE_TARGET_SIZE, interpolation=cv2.INTER_AREA)
-                        processed_frames_list.append(resized)
+                        full_frame = selected_frames[:, :, frame_idx]
+                        frame_resized = cv2.resize(full_frame, cfg.IMAGE_TARGET_SIZE, interpolation=cv2.INTER_AREA)
+                        mask_resized = cv2.resize(individual_mask.astype(np.float32), cfg.IMAGE_TARGET_SIZE, interpolation=cv2.INTER_NEAREST)
+                        stacked_frame = np.stack([frame_resized, mask_resized], axis=-1)
+                        processed_frames_list.append(stacked_frame)
+                else:
+                    # OLD LOGIC: Hard crop to the bounding box
+                    x, y, w, h = cv2.boundingRect(individual_mask.astype(np.uint8))
+                    pad_w = int(w * cfg.ROI_PADDING_PERCENT / 2)
+                    pad_h = int(h * cfg.ROI_PADDING_PERCENT / 2)
+                    x1, y1 = max(0, x - pad_w), max(0, y - pad_h)
+                    x2, y2 = min(W, x + w + pad_w), min(H, y + h + pad_h)
+                    cropped_rois = selected_frames[y1:y2, x1:x2, :]
 
-                elif dataset_type in ['flow', 'hybrid']:
-                    for frame_idx in range(cfg.NUM_FRAMES_PER_SAMPLE - 1):
-                        prev_roi = cv2.resize(
-                            cropped_rois[:, :, frame_idx], cfg.IMAGE_TARGET_SIZE, cv2.INTER_AREA)
-                        next_roi = cv2.resize(
-                            cropped_rois[:, :, frame_idx + 1], cfg.IMAGE_TARGET_SIZE, cv2.INTER_AREA)
+                    if cropped_rois.size == 0:
+                        print(f"Warning: Cropped ROI is empty for {new_video_id}. Skipping.")
+                        continue
 
-                        prev_norm = cv2.normalize(
-                            prev_roi, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-                        next_norm = cv2.normalize(
-                            next_roi, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+                    if dataset_type == 'thermal':
+                        for frame_idx in range(cfg.NUM_FRAMES_PER_SAMPLE):
+                            resized = cv2.resize(cropped_rois[:, :, frame_idx], cfg.IMAGE_TARGET_SIZE, interpolation=cv2.INTER_AREA)
+                            processed_frames_list.append(resized)
 
-                        flow = cv2.calcOpticalFlowFarneback(
-                            prev_norm, next_norm, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+                    elif dataset_type in ['flow', 'hybrid']:
+                        for frame_idx in range(cfg.NUM_FRAMES_PER_SAMPLE - 1):
+                            prev_roi = cv2.resize(cropped_rois[:, :, frame_idx], cfg.IMAGE_TARGET_SIZE, cv2.INTER_AREA)
+                            next_roi = cv2.resize(cropped_rois[:, :, frame_idx + 1], cfg.IMAGE_TARGET_SIZE, cv2.INTER_AREA)
+                            
+                            prev_norm = cv2.normalize(prev_roi, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+                            next_norm = cv2.normalize(next_roi, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+                            
+                            flow = cv2.calcOpticalFlowFarneback(prev_norm, next_norm, None, 0.5, 3, 15, 3, 5, 1.2, 0)
 
-                        if dataset_type == 'flow':
-                            processed_frames_list.append(flow)
-                        elif dataset_type == 'hybrid':
-                            min_val, max_val = prev_roi.min(), prev_roi.max()
-                            thermal_ch = (
-                                prev_roi - min_val) / (max_val - min_val) if max_val > min_val else np.zeros_like(prev_roi)
-                            hybrid_frame = np.dstack([thermal_ch, flow])
-                            processed_frames_list.append(hybrid_frame)
+                            if dataset_type == 'flow':
+                                processed_frames_list.append(flow)
+                            elif dataset_type == 'hybrid':
+                                min_val, max_val = prev_roi.min(), prev_roi.max()
+                                thermal_ch = (prev_roi - min_val) / (max_val - min_val) if max_val > min_val else np.zeros_like(prev_roi)
+                                hybrid_frame = np.dstack([thermal_ch, flow])
+                                processed_frames_list.append(hybrid_frame)
 
                 if not processed_frames_list:
                     raise ValueError("No frames were processed.")
@@ -331,11 +331,11 @@ def create_dataset(dataset_type):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate a dataset for CNN-based models.")
-    parser.add_argument("--type", type=str, required=True, choices=['thermal', 'flow', 'hybrid'],
+    parser.add_argument("--type", type=str, required=True, choices=['thermal', 'flow', 'hybrid','thermal_masked'],
                         help="The type of dataset to generate.")
     args = parser.parse_args()
     create_dataset(args.type)
 
 """
-python -m scripts.create_dataset --type thermal
+python -m scripts.create_dataset --type thermal_masked
 """

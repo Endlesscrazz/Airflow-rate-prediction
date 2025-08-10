@@ -19,23 +19,57 @@ RAW_DATASET_PARENT_DIR = os.path.join(PROJECT_ROOT, "datasets")
 RAW_MASK_PARENT_DIR = os.path.join(PROJECT_ROOT, "output_SAM/datasets")
 # Path to the top-level directory where processed CNN datasets will be saved.
 PROCESSED_DATASET_DIR = os.path.join(PROJECT_ROOT, "CNN_dataset")
+GROUND_TRUTH_CSV_PATH = os.path.join(PROJECT_ROOT, "airflow_ground_truth.csv")
 
 # --- Dataset Creation Parameters ---
 # These parameters control how the video data is processed into sequences.
 ROI_PADDING_PERCENT = 0.20
 TRUE_FPS = 5
-FOCUS_DURATION_SECONDS = 5 #10
+FOCUS_DURATION_SECONDS =  10 #10
 NUM_FRAMES_PER_SAMPLE = 25
 IMAGE_TARGET_SIZE = (128, 128)
+
+# --- NEW: Experiment Control Flags ---
+# Test 1: Per-fold scaling for tabular features
+ENABLE_PER_FOLD_SCALING = True  # Set to True to enable Test 1
+SCALER_KIND = "robust"          # Choice: "robust" or "standard"
+SAVE_SCALERS = True             # Save scalers for hold-out evaluation
+
+# Test 3: Mask-as-channel for CNN input
+# This is now controlled by the --type argument in create_dataset.py
+# We define channel counts and normalization constants here.
+IMAGE_CHANNELS_BY_TYPE = {
+    "thermal": 1,
+    "thermal_masked": 2,
+    "flow": 2,
+    "hybrid": 3
+}
+
+# --- NEW: Normalization Constants by Channel Count ---
+# Defines mean/std for different input types
+NORM_CONSTANTS = {
+    1: {"mean": [0.5], "std": [0.5]},
+    2: {"mean": [0.5, 0.5], "std": [0.5, 0.5]}, # For Thermal + Mask
+    # You can add specific means/stds for flow later if calculated
+    # 2: {"mean": [0.0, 0.0], "std": [1.0, 1.0]}, # For Flow
+    3: {"mean": [0.5, 0.0, 0.0], "std": [0.5, 1.0, 1.0]} # For Hybrid
+}
+
 
 # Configuration for which raw datasets to process.
 # The keys are identifiers, 'dataset_subfolder' is the folder name in RAW_DATASET_PARENT_DIR,
 # and 'mask_subfolder' is the folder name in RAW_MASK_PARENT_DIR.
+# DATASET_CONFIGS = {
+#     "gypsum_single_hole": {"material": "gypsum", "dataset_subfolder": "dataset_gypsum", "mask_subfolder": "dataset_gypsum"},
+#     "gypsum_single_hole2": {"material": "gypsum", "dataset_subfolder": "dataset_gypsum2", "mask_subfolder": "dataset_gypsum2"},
+#     "brick_cladding_single_hole": {"material": "brick_cladding", "dataset_subfolder": "dataset_brickcladding", "mask_subfolder": "dataset_brickcladding"},
+#     "brick_cladding_two_holes": {"material": "brick_cladding", "dataset_subfolder": "dataset_two_holes_brickcladding", "mask_subfolder": "dataset_two_holes_brickcladding"}
+# }
+
 DATASET_CONFIGS = {
-    "gypsum_single_hole": {"material": "gypsum", "dataset_subfolder": "dataset_gypsum", "mask_subfolder": "dataset_gypsum"},
-    "gypsum_single_hole2": {"material": "gypsum", "dataset_subfolder": "dataset_gypsum2", "mask_subfolder": "dataset_gypsum2"},
-    "brick_cladding_single_hole": {"material": "brick_cladding", "dataset_subfolder": "dataset_brickcladding", "mask_subfolder": "dataset_brickcladding"},
-    "brick_cladding_two_holes": {"material": "brick_cladding", "dataset_subfolder": "dataset_two_holes_brickcladding", "mask_subfolder": "dataset_two_holes_brickcladding"}
+    "gypsum_0716": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07162025_noshutter"},
+    "gypsum_0725": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07252025_noshutter"},
+    "gypsum_0729": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07292025_noshutter"},
 }
 
 # --- Feature Engineering Lists & Flags ---

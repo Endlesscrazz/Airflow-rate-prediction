@@ -1,4 +1,4 @@
-# scripts/train_cv.py
+# scripts/train.py
 """
 Main script for running cross-validation on a given model and dataset.
 All configurations are imported from src_cnn.config and command-line arguments.
@@ -15,12 +15,14 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from sklearn.model_selection import GroupKFold
 from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.preprocessing import StandardScaler, RobustScaler
 from tqdm import tqdm
 import random
 import argparse
+import joblib
 
 # --- Import project modules ---
-# Add the project root to the Python path to allow absolute imports
+
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
@@ -91,8 +93,12 @@ def main():
     METADATA_PATH = os.path.join(CNN_DATASET_DIR, "metadata.csv") 
 
     model_name_tag = f"{args.model_type}_{args.in_channels}ch_optuna"
+    if cfg.ENABLE_PER_FOLD_SCALING:
+        model_name_tag += f"_{cfg.SCALER_KIND}scaled"
+        
     MODEL_SAVE_DIR = f"trained_models_{model_name_tag}_CV"
     RESULTS_SAVE_DIR = f"results_{model_name_tag}_CV"
+    SCALER_SAVE_DIR = os.path.join(MODEL_SAVE_DIR, "scalers") # New directory for scalers
 
     print(f"--- Starting CNN-based Model Training (Cross-Validation) ---")
     print(f"Model Type: {args.model_type.upper()} | Fold: {current_fold + 1}/{n_splits} | Channels: {args.in_channels}")
@@ -115,30 +121,61 @@ def main():
     print(f"\n----- RUNNING FOLD {current_fold + 1}/{n_splits} -----")
     print(f"Train set size: {len(train_idx)}, Validation set size: {len(val_idx)}")
 
-    train_df = df_metadata.iloc[train_idx]
-    val_df = df_metadata.iloc[val_idx]
+    # Use .copy() to prevent SettingWithCopyWarning when scaling
+    train_df = df_metadata.iloc[train_idx].copy()
+    val_df = df_metadata.iloc[val_idx].copy()
+
+    available_context_features = [col for col in cfg.CONTEXT_FEATURES if col in train_df.columns]
+    available_dynamic_features = [col for col in cfg.DYNAMIC_FEATURES if col in train_df.columns]
+    
+    print(f"\nUsing {len(available_context_features)} available context features: {available_context_features}")
+    print(f"Using {len(available_dynamic_features)} available dynamic features: {available_dynamic_features}")
+
+    if cfg.ENABLE_PER_FOLD_SCALING:
+        print(f"\nApplying per-fold scaling with '{cfg.SCALER_KIND}' scaler...")
+        
+        # Identify all numeric tabular columns to be scaled
+        numeric_cols = available_context_features + available_dynamic_features
+        # Ensure we only try to scale columns that actually exist and are numeric
+        numeric_cols = [col for col in numeric_cols if col in train_df.columns and pd.api.types.is_numeric_dtype(train_df[col])]
+        
+        if cfg.SCALER_KIND == "robust":
+            scaler = RobustScaler()
+        elif cfg.SCALER_KIND == "standard":
+            scaler = StandardScaler()
+        else:
+            raise ValueError(f"Unknown scaler kind: {cfg.SCALER_KIND}")
+
+        # Fit scaler ONLY on the training data for this fold
+        train_df[numeric_cols] = scaler.fit_transform(train_df[numeric_cols])
+        # Transform the validation data using the same fitted scaler
+        val_df[numeric_cols] = scaler.transform(val_df[numeric_cols])
+        
+        if cfg.SAVE_SCALERS:
+            os.makedirs(SCALER_SAVE_DIR, exist_ok=True)
+            scaler_path = os.path.join(SCALER_SAVE_DIR, f"scaler_fold_{current_fold}.pkl")
+            joblib.dump(scaler, scaler_path)
+            print(f"Saved fitted scaler for fold {current_fold} to {scaler_path}")
 
     # 5. Data Transforms and Loaders
-    if args.in_channels == 1: NORM_MEAN, NORM_STD = [0.5], [0.5]
-    elif args.in_channels == 2: NORM_MEAN, NORM_STD = [0.0, 0.0], [1.0, 1.0]
-    elif args.in_channels == 3: NORM_MEAN, NORM_STD = [0.5, 0.0, 0.0], [0.5, 1.0, 1.0]
-    else: raise ValueError(f"Unsupported number of channels: {args.in_channels}")
-
+    norm_params = cfg.NORM_CONSTANTS.get(args.in_channels)
+    if not norm_params: raise ValueError(f"Normalization constants not defined for {args.in_channels} channels in config.")
+    
     train_transform = transforms.Compose([
         transforms.Lambda(lambda x: x + 0.05 * torch.randn_like(x)),
         transforms.RandomErasing(p=0.25, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=0),
-        transforms.Normalize(mean=NORM_MEAN, std=NORM_STD)
+        transforms.Normalize(mean=norm_params["mean"], std=norm_params["std"])
     ])
-    val_transform = transforms.Compose([transforms.Normalize(mean=NORM_MEAN, std=NORM_STD)])
+    val_transform = transforms.Compose([transforms.Normalize(mean=norm_params["mean"], std=norm_params["std"])])
     
     train_dataset = AirflowSequenceDataset(train_df, CNN_DATASET_DIR, 
-                                           context_feature_cols=cfg.CONTEXT_FEATURES,
-                                           dynamic_feature_cols=cfg.DYNAMIC_FEATURES,
-                                           transform=train_transform)
+                                           context_feature_cols=available_context_features,
+                                           dynamic_feature_cols=available_dynamic_features,
+                                           transform=train_transform, is_train=True)
     val_dataset = AirflowSequenceDataset(val_df, CNN_DATASET_DIR, 
-                                           context_feature_cols=cfg.CONTEXT_FEATURES,
-                                           dynamic_feature_cols=cfg.DYNAMIC_FEATURES,
-                                           transform=val_transform)
+                                           context_feature_cols=available_context_features,
+                                           dynamic_feature_cols=available_dynamic_features,
+                                           transform=val_transform, is_train=False)
     
     train_loader = DataLoader(train_dataset, batch_size=cfg.BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=cfg.BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
@@ -146,8 +183,8 @@ def main():
     # 6. Initialize Model, Loss, and Optimizer
     if args.model_type == 'lstm':
         model = UltimateHybridRegressor(
-            num_context_features=len(cfg.CONTEXT_FEATURES),
-            num_dynamic_features=len(cfg.DYNAMIC_FEATURES),
+            num_context_features=len(available_context_features),
+            num_dynamic_features=len(available_dynamic_features),
             cnn_in_channels=args.in_channels,
             lstm_hidden_size=cfg.OPTUNA_PARAMS['lstm_hidden_size'],
             lstm_layers=cfg.OPTUNA_PARAMS['lstm_layers']

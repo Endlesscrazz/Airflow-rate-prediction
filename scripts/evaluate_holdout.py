@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from sklearn.metrics import r2_score, mean_squared_error
 import argparse
+import joblib
 
 # --- Import project modules ---
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -43,9 +44,11 @@ def main():
     HOLDOUT_METADATA_PATH = os.path.join(CNN_DATASET_DIR, "holdout_metadata.csv") 
     
     model_name_tag = f"{args.model_type}_{args.in_channels}ch"
-    if args.optuna_tuned:
-        model_name_tag += "_optuna"
+    if args.optuna_tuned: model_name_tag += "_optuna"
+    if cfg.ENABLE_PER_FOLD_SCALING: model_name_tag += f"_{cfg.SCALER_KIND}scaled"
+        
     MODEL_PATH = f"trained_models_final/final_model_{model_name_tag}.pth"
+    SCALER_PATH = f"trained_models_final/final_scaler_{model_name_tag}.pkl"
     
     print("--- Evaluating Final Model on Hold-Out Set ---")
     print(f"Model Type: {args.model_type.upper()} | Channels: {args.in_channels} | Tuned: {args.optuna_tuned}")
@@ -57,15 +60,28 @@ def main():
         print(f"FATAL ERROR: Hold-out metadata not found at '{HOLDOUT_METADATA_PATH}'")
         sys.exit(1)
     holdout_df = pd.read_csv(HOLDOUT_METADATA_PATH)
-    
-    if args.in_channels == 1: NORM_MEAN, NORM_STD = [0.5], [0.5]
-    elif args.in_channels == 2: NORM_MEAN, NORM_STD = [0.0, 0.0], [1.0, 1.0]
-    elif args.in_channels == 3: NORM_MEAN, NORM_STD = [0.5, 0.0, 0.0], [0.5, 1.0, 1.0]
-    else: raise ValueError(f"Unsupported number of channels: {args.in_channels}")
 
-    val_transform = transforms.Compose([transforms.Normalize(mean=NORM_MEAN, std=NORM_STD)])
+    if cfg.ENABLE_PER_FOLD_SCALING:
+        print(f"\nApplying saved '{cfg.SCALER_KIND}' scaler to hold-out data...")
+        if not os.path.exists(SCALER_PATH):
+            print(f"FATAL ERROR: Saved scaler not found at {SCALER_PATH}")
+            print("Please run the final training script first to generate the scaler.")
+            sys.exit(1)
+        
+        scaler = joblib.load(SCALER_PATH)
+        numeric_cols = [col for col in (cfg.CONTEXT_FEATURES + cfg.DYNAMIC_FEATURES) if col in holdout_df.columns]
+        
+        # Use the loaded scaler to TRANSFORM the hold-out data. DO NOT FIT.
+        holdout_df[numeric_cols] = scaler.transform(holdout_df[numeric_cols])
+        print("Hold-out data successfully scaled.")
     
-    holdout_dataset = AirflowSequenceDataset(holdout_df, CNN_DATASET_DIR, cfg.CONTEXT_FEATURES, cfg.DYNAMIC_FEATURES, val_transform)
+    # 4. Data Transforms and Loaders
+    norm_params = cfg.NORM_CONSTANTS.get(args.in_channels)
+    if not norm_params: raise ValueError(f"Normalization constants not defined for {args.in_channels} channels.")
+    
+    val_transform = transforms.Compose([transforms.Normalize(mean=norm_params["mean"], std=norm_params["std"])])
+    
+    holdout_dataset = AirflowSequenceDataset(holdout_df, CNN_DATASET_DIR, cfg.CONTEXT_FEATURES, cfg.DYNAMIC_FEATURES, val_transform, is_train=False)
     holdout_loader = DataLoader(holdout_dataset, batch_size=cfg.BATCH_SIZE, shuffle=False)
     
     if args.model_type == 'lstm':
@@ -139,7 +155,7 @@ if __name__ == "__main__":
 """
 python -m scripts.evaluate_holdout \
     --model_type "lstm" \
-    --dataset_dir "CNN_dataset/dataset_1ch_thermal_f5s" \
-    --in_channels 1 \
+    --dataset_dir "CNN_dataset/dataset_2ch_thermal_masked_f10s" \
+    --in_channels 2 \
     --optuna_tuned
 """

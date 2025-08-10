@@ -13,9 +13,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from sklearn.preprocessing import StandardScaler, RobustScaler
 from tqdm import tqdm
 import random
 import argparse
+import joblib
 
 # --- Import project modules ---
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -50,12 +52,20 @@ def main():
     CNN_DATASET_DIR = args.dataset_dir
     TRAIN_METADATA_PATH = os.path.join(CNN_DATASET_DIR, "train_metadata.csv") 
     
-    model_name_tag = f"{args.model_type}_{args.in_channels}ch_optuna"
+    model_name_tag = f"{args.model_type}_{args.in_channels}ch"
+    
+    # Append tags based on configuration for clarity
+    model_name_tag += "_optuna" # Assuming final models are always optuna-tuned
+    if cfg.ENABLE_PER_FOLD_SCALING:
+        model_name_tag += f"_{cfg.SCALER_KIND}scaled"
+        
     MODEL_SAVE_DIR = "trained_models_final"
     MODEL_SAVE_PATH = os.path.join(MODEL_SAVE_DIR, f"final_model_{model_name_tag}.pth")
+    SCALER_SAVE_PATH = os.path.join(MODEL_SAVE_DIR, f"final_scaler_{model_name_tag}.pkl")
 
     print(f"--- Starting FINAL Model Training (Optuna-tuned) ---")
     print(f"Model Type: {args.model_type.upper()} | Channels: {args.in_channels}")
+    print(f"Scaling Enabled: {cfg.ENABLE_PER_FOLD_SCALING} ({cfg.SCALER_KIND if cfg.ENABLE_PER_FOLD_SCALING else 'N/A'})")
     print(f"Dataset: {CNN_DATASET_DIR}")
     print(f"Model will be saved to: {MODEL_SAVE_PATH}")
     print(f"Using device: {cfg.DEVICE.upper()}")
@@ -66,24 +76,40 @@ def main():
         sys.exit(1)
     train_df = pd.read_csv(TRAIN_METADATA_PATH)
     print(f"Loaded {len(train_df)} samples for final training.")
+
+    if cfg.ENABLE_PER_FOLD_SCALING:
+        print(f"\nApplying scaling with '{cfg.SCALER_KIND}' scaler to the full development set...")
+        
+        numeric_cols = [col for col in (cfg.CONTEXT_FEATURES + cfg.DYNAMIC_FEATURES) if col in train_df.columns]
+        
+        if cfg.SCALER_KIND == "robust": scaler = RobustScaler()
+        elif cfg.SCALER_KIND == "standard": scaler = StandardScaler()
+        else: raise ValueError(f"Unknown scaler kind: {cfg.SCALER_KIND}")
+
+        # Fit AND transform the entire training dataframe
+        train_df[numeric_cols] = scaler.fit_transform(train_df[numeric_cols])
+        
+        if cfg.SAVE_SCALERS:
+            os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
+            joblib.dump(scaler, SCALER_SAVE_PATH)
+            print(f"Saved final fitted scaler to {SCALER_SAVE_PATH}")
     
     # 4. Data Transforms and Loaders
-    if args.in_channels == 1: NORM_MEAN, NORM_STD = [0.5], [0.5]
-    elif args.in_channels == 2: NORM_MEAN, NORM_STD = [0.0, 0.0], [1.0, 1.0]
-    elif args.in_channels == 3: NORM_MEAN, NORM_STD = [0.5, 0.0, 0.0], [0.5, 1.0, 1.0]
-    else: raise ValueError(f"Unsupported number of channels: {args.in_channels}")
+    norm_params = cfg.NORM_CONSTANTS.get(args.in_channels)
+    if not norm_params: raise ValueError(f"Normalization constants not defined for {args.in_channels} channels.")
 
     train_transform = transforms.Compose([
         transforms.Lambda(lambda x: x + 0.05 * torch.randn_like(x)),
         transforms.RandomErasing(p=0.25, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=0),
-        transforms.Normalize(mean=NORM_MEAN, std=NORM_STD)
+        transforms.Normalize(mean=norm_params["mean"], std=norm_params["std"])
     ])
     
     train_dataset = AirflowSequenceDataset(
         train_df, CNN_DATASET_DIR, 
         context_feature_cols=cfg.CONTEXT_FEATURES,
         dynamic_feature_cols=cfg.DYNAMIC_FEATURES,
-        transform=train_transform
+        transform=train_transform,
+        is_train=True # Enable augmentations
     )
     train_loader = DataLoader(train_dataset, batch_size=cfg.BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
     

@@ -1,0 +1,92 @@
+# src_feature_based/config.py
+"""
+Central configuration file for the Handcrafted Feature-Based pipeline.
+"""
+import os
+
+# --- Path Configuration ---
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# The top-level directory containing all raw data subfolders.
+RAW_DATA_ROOT = os.path.join(PROJECT_ROOT, "datasets")
+# Path to the parent directory containing corresponding .npy mask files
+RAW_MASK_PARENT_DIR = os.path.join(PROJECT_ROOT, "Output_SAM/datasets")
+# Path to the ground truth airflow data. We'll look for it in the root.
+GROUND_TRUTH_CSV_PATH = os.path.join(PROJECT_ROOT, "airflow_ground_truth.csv")
+# Output directory for all generated files for this pipeline.
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output_feature_based")
+
+# --- Dataset Creation Parameters ---
+DATASET_CONFIGS = {
+    "gypsum_0716": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07162025_noshutter"},
+    "gypsum_0725": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07252025_noshutter"},
+    "gypsum_0729": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07292025_noshutter"},
+}
+
+# --- Feature Engineering Parameters ---
+# The full list of features to be calculated by generate_features.py
+ALL_POSSIBLE_FEATURES = [
+    'hotspot_area', 'hotspot_avg_temp_change_rate_initial', 'hotspot_avg_temp_change_magnitude_initial',
+    'peak_pixel_temp_change_rate_initial', 'peak_pixel_temp_change_magnitude_initial', 'temp_mean_avg_initial',
+    'temp_std_avg_initial', 'temp_min_overall_initial', 'temp_max_overall_initial',
+    'stabilized_mean_deltaT', 'overall_mean_deltaT', 'max_abs_mean_deltaT',
+    'stabilized_std_deltaT', 'overall_std_deltaT', 'mean_area_significant_change',
+    'stabilized_area_significant_change', 'max_area_significant_change',
+    'num_hotspots', 'hotspot_solidity', 'centroid_distance', 'time_to_peak_mean_temp',
+    'temperature_skewness', 'temperature_kurtosis', 'rate_of_std_change_initial', 'peak_to_average_ratio',
+    'radial_profile_0', 'radial_profile_1', 'radial_profile_2', 'radial_profile_3', 'radial_profile_4',
+    'bbox_area', 'bbox_aspect_ratio'
+]
+
+SELECTED_FEATURES = [
+    'delta_T_log',
+    'hotspot_area_log',
+    'hotspot_avg_temp_change_rate_initial_norm',
+    'hotspot_avg_temp_change_magnitude_initial',
+    'peak_pixel_temp_change_rate_initial',
+    'temp_mean_avg_initial',
+    'temp_std_avg_initial',
+    'temp_min_overall_initial',
+    'temp_max_overall_initial',
+    #'overall_mean_deltaT'
+]
+# Feature transformation flags used during feature generation
+LOG_TRANSFORM_AREA = True
+NORMALIZE_AVG_RATE_INITIAL = True
+TRUE_FPS = 5
+FOCUS_DURATION_SECONDS = 10
+
+# --- Modeling and Evaluation Parameters ---
+RANDOM_STATE = 42
+HOLDOUT_SIZE = 0.2
+CV_FOLDS = 5
+
+# Advanced Modeling Flags
+ENABLE_TARGET_SCALING = True
+ENABLE_ASYMMETRIC_LOSS = False
+ASYMMETRIC_LOSS_OVER_WEIGHT = 2.5
+
+# Hyperparameter grids for tuning
+PARAM_GRIDS = {
+    'XGBoost': {
+        'model__n_estimators': [100, 200],
+        'model__max_depth': [3, 5, 7],
+        'model__learning_rate': [0.05, 0.1],
+    },
+    'RandomForest': {
+        'model__n_estimators': [100, 200],
+        'model__max_depth': [5, 10, None],
+    },
+    # --- NEW GRIDS ---
+    'SVR': {
+        'model__C': [1, 10, 50],
+        'model__epsilon': [0.01, 0.1, 0.2],
+        'model__kernel': ['rbf'],
+    },
+    'MLPRegressor': {
+        'model__hidden_layer_sizes': [(5,), (10,), (10, 5)],
+        'model__activation': ['relu', 'tanh'],
+        'model__alpha': [0.5, 1.0, 2.0],  
+        'model__learning_rate_init': [0.001, 0.01],
+    }
+}
+

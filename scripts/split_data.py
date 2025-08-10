@@ -95,5 +95,5 @@ if __name__ == "__main__":
     main()
 
 """
-python -m scripts.split_data --dataset_dir "CNN_dataset/dataset_1ch_thermal_f5s"
+python -m scripts.split_data --dataset_dir "CNN_dataset/dataset_2ch_thermal_masked_f10s"
 """

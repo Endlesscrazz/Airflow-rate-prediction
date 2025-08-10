@@ -18,9 +18,7 @@ from scipy.stats import kendalltau, mstats
 from tqdm import tqdm
 from joblib import Parallel, delayed
 
-# --- Ensure project modules are importable ---
 try:
-    import archive.src_feature_based.old_cfg as old_cfg
     from segment_anything import sam_model_registry, SamPredictor
 except ImportError:
     try: from segment_anything import sam_model_registry, SamPredictor
@@ -28,9 +26,6 @@ except ImportError:
     class MockConfig: MAT_FRAMES_KEY = 'TempFrames'
     old_cfg = MockConfig()
 
-# ========================================================================================
-# --- HELPER & CORE FUNCTIONS ---
-# ========================================================================================
 
 def save_parameters(args, output_dir):
     """Saves the command-line arguments to a text file."""
@@ -39,7 +34,6 @@ def save_parameters(args, output_dir):
         f.write("--- Run Parameters ---\n")
         for arg, value in sorted(vars(args).items()): f.write(f"{arg}: {value}\n")
 
-# --- CORRECTLY RE-ADDED SPATIAL FILTER FUNCTION ---
 def apply_spatial_filter(frames, filter_type='none', d=9, sigmaColor=75, sigmaSpace=75):
     """(Optional) Applies a spatial filter to each frame to reduce noise."""
     if filter_type.lower() == 'none':
@@ -183,7 +177,6 @@ def run_sam_with_box_and_point_prompts(frame_rgb, top_candidates, predictor):
     for cand in top_candidates:
         stat = cand['stat']
         
-        # Bounding Box (same as before)
         x1, y1 = stat[cv2.CC_STAT_LEFT], stat[cv2.CC_STAT_TOP]
         x2, y2 = x1 + stat[cv2.CC_STAT_WIDTH], y1 + stat[cv2.CC_STAT_HEIGHT]
         input_box = np.array([x1, y1, x2, y2])
@@ -195,7 +188,7 @@ def run_sam_with_box_and_point_prompts(frame_rgb, top_candidates, predictor):
         masks, _, _ = predictor.predict(
             point_coords=point_coords,
             point_labels=point_labels,
-            box=input_box[None, :], # The bounding box provides the context
+            box=input_box[None, :], 
             multimask_output=False,
         )
         if len(masks) > 0:
@@ -237,14 +230,14 @@ def main(args):
             except Exception as e:
                 print(f"  Error loading {video_filename}: {e}. Skipping.", file=sys.stderr); continue
 
-            # --- Execute Pipeline Step-by-Step ---
+            # Execute Pipeline 
             spatially_filtered_frames = apply_spatial_filter(frames, args.spatial_filter)
             temporally_smoothed_frames = apply_temporal_smoothing(spatially_filtered_frames, args.temporal_smooth_window)
             activity_map = generate_activity_map(temporally_smoothed_frames, args.activity_method, args.env_para)
             
             target_frame = np.median(frames, axis=2)
             
-            # --- Selectable ROI Method ---
+            # Select ROI Method 
             if args.roi_method == 'border':
                 roi_mask = create_border_roi_mask((H, W), args.roi_border_percent)
             else: # Default to 'otsu'
@@ -323,20 +316,9 @@ if __name__ == "__main__":
         
     main(args)
 """
-python src/run_SAM.py --dataset_dir datasets/dataset_brickcladding \
-    --base_output_dir output_SAM/datasets/dataset_brickcladding --num_leaks 
-    
-python src/run_SAM.py --dataset_dir datasets/dataset_gypsum \
-    --base_output_dir output_SAM/datasets/dataset_gypsum --num_leaks 1 \
-    --env_para 1 \
-    --roi_method border
-
-python src/run_SAM.py --dataset_dir datasets/dataset_gypsum2 \
-    --base_output_dir output_SAM/datasets/dataset_gypsum2 \
+python -m scripts.run_SAM --dataset_dir datasets/Fluke_Gypsum_07292025_noshutter \
+    --base_output_dir output_SAM/datasets/Fluke_Gypsum_07292025_noshutter \
     --num_leaks 1 \
-    --env_para 1 \
-    --roi_method border
-
-python src/run_SAM.py --dataset_dir datasets/dataset_two_holes_brickcladding \
-    --base_output_dir output_SAM/datasets/dataset_two_holes_brickcladding 
+    --roi_method border 
+    
 """

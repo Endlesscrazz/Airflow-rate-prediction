@@ -53,26 +53,16 @@ echo "----------------"
 
 export CHPC_SCRATCH_DIR="/scratch/general/vast/u1527145"
 
-# --- Experiment 1: Simplified 'avg' model on 2-channel flow data ---
-# This is the crucial diagnostic test.
-# MODEL_TYPE="avg"
-# DATASET_DIR="cnn_dataset/dataset_cnn_lstm_flow"
-# IN_CHANNELS=2
-
-
-# --- Experiment 2: Full 'lstm' model on 2-channel flow data ---
-# This is your best-performing model so far, for comparison.
-# To run this, comment out the block above and uncomment this one.
+# --- Experiment 1: LSTM model on 1-ch Thermal (Hard Crop) ---
+# This is your previous best model, for baseline comparison.
 # MODEL_TYPE="lstm"
-# DATASET_DIR="CNN_dataset/dataset_2ch_flow"
-# IN_CHANNELS=2
+# DATASET_DIR="CNN_dataset/dataset_1ch_thermal_hard_crop"
+# IN_CHANNELS=1
 
-# --- Experiment 2)a: Full 'lstm' model on 1-channel thermal data ---
-# This is your best-performing model so far, for comparison.
-# To run this, comment out the block above and uncomment this one.
+# --- Experiment 2: LSTM model on 2-ch Thermal + Mask (NEW EXPERIMENT) ---
 MODEL_TYPE="lstm"
-DATASET_DIR="CNN_dataset/dataset_1ch_thermal"
-IN_CHANNELS=1
+DATASET_DIR="CNN_dataset/dataset_2ch_thermal_masked_f10s"
+IN_CHANNELS=2
 
 
 # --- Experiment 3: Full 'lstm' model on 3-channel hybrid data ---
@@ -86,20 +76,15 @@ IN_CHANNELS=1
 #==============================================================================
 echo "--- Starting Training for Fold ${SLURM_ARRAY_TASK_ID} ---"
 
-# Calculate the total number of folds from the SLURM array variable
 TOTAL_FOLDS=$((${SLURM_ARRAY_TASK_MAX} + 1))
-
 echo "Running with Fold: ${SLURM_ARRAY_TASK_ID}, Total Folds: ${TOTAL_FOLDS}"
 
-# Run the python script, passing both required arguments.
-# Running as a module with `python -m` is good practice.
-python -m src_cnn.train_cnn \
+python -m src_cnn.train_cv \
     --fold ${SLURM_ARRAY_TASK_ID} \
     --total_folds ${TOTAL_FOLDS} \
     --model_type "${MODEL_TYPE}" \
     --dataset_dir "${PROJECT_DIR}/${DATASET_DIR}" \
     --in_channels ${IN_CHANNELS}
-
 
 echo "========================================================"
 echo "Job Task ${SLURM_ARRAY_TASK_ID} finished on $(date)"

@@ -17,23 +17,16 @@
 #SBATCH --mail-user=u1527145@utah.edu
 
 #==============================================================================
-#
-#  --- SET THESE VARIABLES BASED ON YOUR BEST CV RESULTS ---
-#
-#  After running your cross-validation experiments, identify the
-#  best-performing combination and set it here.
-#
-#  Example: If the 'lstm' model on 2-channel flow data was best:
-#    MODEL_TYPE="lstm"
-#    DATASET_DIR="CNN_dataset/dataset_2ch_flow"
-#    IN_CHANNELS=2
+# --- Final Model: LSTM on 1-ch Thermal (10s focus, Optuna-tuned) ---
+# MODEL_TYPE="lstm"
+# DATASET_DIR="CNN_dataset/dataset_1ch_thermal_hard_crop"
+# IN_CHANNELS=1
 
-# --- Experiment 2)a: Full 'lstm' model on 1-channel thermal data ---
-# This is your best-performing model so far, for comparison.
-# To run this, comment out the block above and uncomment this one.
+# --- Example: Final Model for 2-ch Thermal+Mask ---
 MODEL_TYPE="lstm"
-DATASET_DIR="CNN_dataset/dataset_1ch_thermal_f5s"
-IN_CHANNELS=1
+DATASET_DIR="CNN_dataset/dataset_2ch_thermal_masked_f10s"
+IN_CHANNELS=2
+
 
 #==============================================================================
 
@@ -81,7 +74,6 @@ echo "----------------"
 #==============================================================================
 echo "--- Starting FINAL Model Training on ALL Development Data ---"
 
-# --- FIX: Pass ALL required arguments to the python script ---
 python -m src_cnn.train_final_model \
     --model_type "${MODEL_TYPE}" \
     --dataset_dir "${PROJECT_DIR}/${DATASET_DIR}" \
