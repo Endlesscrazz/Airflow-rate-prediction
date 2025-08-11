@@ -1,8 +1,13 @@
 # scripts/split_data.py
 """
-Splits a main metadata.csv into a development (train) and hold-out (test) set.
-Uses StratifiedGroupKFold to create a balanced split.
-All configurations are imported from src_cnn.config.
+Splits a master metadata/feature CSV into a development (train) and hold-out (test) set.
+
+This single, robust script can handle multiple scenarios:
+- CNN pipeline metadata or feature-based pipeline master feature files.
+- Datasets with single or multiple material types.
+- Correctly groups samples from the same original video (e.g., multi-hole videos).
+
+It uses StratifiedGroupKFold to create the most balanced and leakage-free split possible.
 """
 import pandas as pd
 from sklearn.model_selection import StratifiedGroupKFold
@@ -11,62 +16,92 @@ import sys
 import numpy as np
 import argparse
 
-# --- Import project modules ---
+# --- Add project root to path for imports ---
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
-from src_cnn import config as cfg
+# Import configs from both pipelines to get RANDOM_STATE
+from src_cnn import config as cnn_cfg
+from src_feature_based import config as feat_cfg
 
 def main():
-    parser = argparse.ArgumentParser(description="Create a stratified train/hold-out split for a dataset.")
-    parser.add_argument("--dataset_dir", type=str, required=True,
-                        help="Path to the processed dataset directory (e.g., 'CNN_dataset/dataset_1ch_thermal').")
+    parser = argparse.ArgumentParser(
+        description="Create a stratified train/hold-out split for any dataset.",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+    parser.add_argument("--input_csv", type=str, required=True,
+                        help="Path to the input metadata.csv or master_features.csv file to be split.")
     parser.add_argument("--holdout_size", type=float, default=0.2,
-                        help="The approximate fraction of the data to use for the hold-out set.")
+                        help="The approximate fraction of the data for the hold-out set.")
+    parser.add_argument("--random_state", type=int, default=cnn_cfg.RANDOM_STATE,
+                        help="Seed for the random number generator for reproducibility.")
     args = parser.parse_args()
 
-    METADATA_PATH = os.path.join(args.dataset_dir, "metadata.csv")
-    TRAIN_METADATA_PATH = os.path.join(args.dataset_dir, "train_metadata.csv")
-    HOLDOUT_METADATA_PATH = os.path.join(args.dataset_dir, "holdout_metadata.csv")
-
-    print("--- Creating STRATIFIED Train/Hold-Out Split ---")
+    # Determine output file paths based on the input path
+    input_dir = os.path.dirname(args.input_csv)
+    TRAIN_CSV_PATH = os.path.join(input_dir, "train_metadata.csv")
+    HOLDOUT_CSV_PATH = os.path.join(input_dir, "holdout_metadata.csv")
     
-    if not os.path.exists(METADATA_PATH):
-        print(f"FATAL ERROR: Metadata file not found at {METADATA_PATH}")
+    # If the input is master_features.csv, name the outputs accordingly
+    if "master_features.csv" in args.input_csv:
+        TRAIN_CSV_PATH = os.path.join(input_dir, "train_features.csv")
+        HOLDOUT_CSV_PATH = os.path.join(input_dir, "holdout_features.csv")
+
+    print("--- Creating STRATIFIED & GROUPED Train/Hold-Out Split ---")
+    
+    if not os.path.exists(args.input_csv):
+        print(f"FATAL ERROR: Input file not found at '{args.input_csv}'")
         sys.exit(1)
         
-    df = pd.read_csv(METADATA_PATH)
+    df = pd.read_csv(args.input_csv)
 
-    # Create a combined column for stratification to balance by airflow and material.
-    df['stratify_group'] = df['airflow_rate'].astype(str) + '_' + df['material']
-    groups = df['video_id']
-    y = df['stratify_group']
-
+    # --- Intelligent Stratification Strategy ---
+    print("\nDetermining stratification strategy...")
+    # Always stratify by airflow rate by creating discrete bins
+    df['stratify_bins'] = pd.cut(df['airflow_rate'], bins=5, labels=False, duplicates='drop')
+    
+    # Check if a 'material' column exists and has more than one unique value
+    if 'material' in df.columns and df['material'].nunique() > 1:
+        print("Multiple materials detected. Stratifying by 'airflow_rate' AND 'material'.")
+        df['stratify_group'] = df['stratify_bins'].astype(str) + '_' + df['material']
+    else:
+        print("Single material detected (or no material column). Stratifying by 'airflow_rate' only.")
+        df['stratify_group'] = df['stratify_bins'].astype(str)
+        
+    # Create group labels from the original video ID to prevent data leakage
+    df['original_video_id'] = df['video_id'].apply(lambda x: x.split('_hole_')[0])
+    groups = df['original_video_id']
+    y_stratify = df['stratify_group']
+    
     n_splits = int(np.round(1 / args.holdout_size))
     if n_splits < 2:
         raise ValueError("holdout_size is too large to create a valid split.")
 
-    sgkf = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=cfg.RANDOM_STATE)
+    sgkf = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=args.random_state)
 
     try:
-        dev_idx, holdout_idx = next(sgkf.split(X=df, y=y, groups=groups))
+        dev_idx, holdout_idx = next(sgkf.split(X=df, y=y_stratify, groups=groups))
     except ValueError as e:
         print(f"\nCRITICAL ERROR: Could not create a stratified split.")
-        print(f"This often happens if a group ('video_id') contains samples from multiple stratification classes, or if a class has fewer members than n_splits ({n_splits}).")
+        print(f"This can happen if a group ('video_id') contains samples from multiple stratification classes, or if a class has fewer members than n_splits ({n_splits}).")
         print(f"Scikit-learn error: {e}")
         return
 
-    dev_df = df.iloc[dev_idx].drop(columns=['stratify_group'])
-    holdout_df = df.iloc[holdout_idx].drop(columns=['stratify_group'])
+    dev_df = df.iloc[dev_idx]
+    holdout_df = df.iloc[holdout_idx]
 
-    dev_df.to_csv(TRAIN_METADATA_PATH, index=False)
-    holdout_df.to_csv(HOLDOUT_METADATA_PATH, index=False)
+    # Drop the temporary columns before saving
+    dev_df = dev_df.drop(columns=['stratify_bins', 'stratify_group', 'original_video_id'])
+    holdout_df = holdout_df.drop(columns=['stratify_bins', 'stratify_group', 'original_video_id'])
 
-    print(f"\nOriginal dataset size: {len(df)}")
-    print(f"Development (train) set size: {len(dev_df)}")
-    print(f"Hold-out set size: {len(holdout_df)}")
-    print(f"Saved development metadata to: {TRAIN_METADATA_PATH}")
-    print(f"Saved hold-out metadata to: {HOLDOUT_METADATA_PATH}")
+    dev_df.to_csv(TRAIN_CSV_PATH, index=False)
+    holdout_df.to_csv(HOLDOUT_CSV_PATH, index=False)
+
+    print(f"\nOriginal dataset size: {len(df)} samples")
+    print(f"Development set size: {len(dev_df)} samples")
+    print(f"Hold-out set size: {len(holdout_df)} samples")
+    print(f"\nSaved development data to: {TRAIN_CSV_PATH}")
+    print(f"Saved hold-out data to: {HOLDOUT_CSV_PATH}")
 
     # --- Verification Step ---
     print("\n--- Verifying Split Distribution ---")
@@ -81,19 +116,11 @@ def main():
     print("\nOverall distribution of samples per airflow rate:")
     print(verification_df)
 
-    unique_dev = set(dev_df['airflow_rate'].unique())
-    unique_holdout = set(holdout_df['airflow_rate'].unique())
-    missing_in_dev = unique_holdout - unique_dev
-    
-    if missing_in_dev:
-        print(f"\nWARNING: The following airflow rates are in the hold-out set but NOT in the development set:")
-        print(sorted(list(missing_in_dev)))
-    else:
-        print("\nSUCCESS: All airflow rates in the hold-out set are represented in the development set.")
-
 if __name__ == "__main__":
     main()
 
 """
-python -m scripts.split_data --dataset_dir "CNN_dataset/dataset_2ch_thermal_masked_f10s"
+python -m scripts.split_data --input_csv CNN_dataset/dataset_2ch_thermal_masked_f10s/metadata.csv --random_state 43
+python -m scripts.split_data --input_csv output_feature_based/master_features.csv
+
 """

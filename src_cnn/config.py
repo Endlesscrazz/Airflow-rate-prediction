@@ -13,7 +13,6 @@ RANDOM_STATE = 42
 # This structure assumes the script is run from the project's root directory.
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 # Path to the parent directory containing raw .mat video files
-# e.g., '.../Airflow-rate-prediction/datasets_raw/dataset_gypsum'
 RAW_DATASET_PARENT_DIR = os.path.join(PROJECT_ROOT, "datasets")
 # Path to the parent directory containing corresponding .npy mask files
 RAW_MASK_PARENT_DIR = os.path.join(PROJECT_ROOT, "output_SAM/datasets")
@@ -31,13 +30,11 @@ IMAGE_TARGET_SIZE = (128, 128)
 
 # --- NEW: Experiment Control Flags ---
 # Test 1: Per-fold scaling for tabular features
-ENABLE_PER_FOLD_SCALING = True  # Set to True to enable Test 1
-SCALER_KIND = "robust"          # Choice: "robust" or "standard"
-SAVE_SCALERS = True             # Save scalers for hold-out evaluation
+ENABLE_PER_FOLD_SCALING = True  
+SCALER_KIND = "robust"          
+SAVE_SCALERS = True             
 
-# Test 3: Mask-as-channel for CNN input
-# This is now controlled by the --type argument in create_dataset.py
-# We define channel counts and normalization constants here.
+
 IMAGE_CHANNELS_BY_TYPE = {
     "thermal": 1,
     "thermal_masked": 2,
@@ -54,17 +51,6 @@ NORM_CONSTANTS = {
     # 2: {"mean": [0.0, 0.0], "std": [1.0, 1.0]}, # For Flow
     3: {"mean": [0.5, 0.0, 0.0], "std": [0.5, 1.0, 1.0]} # For Hybrid
 }
-
-
-# Configuration for which raw datasets to process.
-# The keys are identifiers, 'dataset_subfolder' is the folder name in RAW_DATASET_PARENT_DIR,
-# and 'mask_subfolder' is the folder name in RAW_MASK_PARENT_DIR.
-# DATASET_CONFIGS = {
-#     "gypsum_single_hole": {"material": "gypsum", "dataset_subfolder": "dataset_gypsum", "mask_subfolder": "dataset_gypsum"},
-#     "gypsum_single_hole2": {"material": "gypsum", "dataset_subfolder": "dataset_gypsum2", "mask_subfolder": "dataset_gypsum2"},
-#     "brick_cladding_single_hole": {"material": "brick_cladding", "dataset_subfolder": "dataset_brickcladding", "mask_subfolder": "dataset_brickcladding"},
-#     "brick_cladding_two_holes": {"material": "brick_cladding", "dataset_subfolder": "dataset_two_holes_brickcladding", "mask_subfolder": "dataset_two_holes_brickcladding"}
-# }
 
 DATASET_CONFIGS = {
     "gypsum_0716": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07162025_noshutter"},
@@ -100,6 +86,7 @@ NORMALIZE_AVG_RATE_INITIAL = True
 BATCH_SIZE = 8
 NUM_EPOCHS_CV = 150
 NUM_EPOCHS_FINAL = 150
+CV_FOLDS = 5
 
 # --- Optuna-Tuned Hyperparameters for the Best Model ---
 OPTUNA_PARAMS = {
