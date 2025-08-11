@@ -22,13 +22,13 @@ To reproduce the results from scratch, follow these steps in order. All commands
 ### Step 0: Initial Setup
 
 1.  **Place Raw Data:**
-    *   Place the raw thermal video directories (e.g., `Fluke_Gypsum_07162025_noshutter`) inside a top-level folder named `datasets_raw`.
-    *   Place the corresponding mask directories inside a top-level folder named `masks_raw`.
+    *   Place the raw thermal video directories (e.g., `Fluke_Gypsum_07162025_noshutter`) inside a top-level folder named `datasets`.
+    *   Place the corresponding mask directories inside a top-level folder named `Output_SAM/datasets`.
     *   Place the `airflow_ground_truth.csv` file in the project's root directory.
 
 2.  **Configure the Pipeline:**
     *   Open `src_feature_based/config.py`.
-    *   Verify that `RAW_DATA_ROOT` and `RAW_MASK_PARENT_DIR` point to the correct parent folders (`datasets_raw` and `masks_raw`).
+    *   Verify that `RAW_DATA_ROOT` and `RAW_MASK_PARENT_DIR` point to the correct parent folders (`datasets` and `Output_SAM/datasets`).
     *   Adjust any other parameters as needed (e.g., `FOCUS_DURATION_SECONDS`, the list of `SELECTED_FEATURES` to use for the final model).
 
 ### Step 1: Generate Master Feature Set

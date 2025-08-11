@@ -77,10 +77,17 @@ def main():
     train_df = pd.read_csv(TRAIN_METADATA_PATH)
     print(f"Loaded {len(train_df)} samples for final training.")
 
+    available_context_features = [col for col in cfg.CONTEXT_FEATURES if col in train_df.columns]
+    available_dynamic_features = [col for col in cfg.DYNAMIC_FEATURES if col in train_df.columns]
+
+    print(f"\nUsing {len(available_context_features)} available context features: {available_context_features}")
+    print(f"Using {len(available_dynamic_features)} available dynamic features: {available_dynamic_features}")
+
     if cfg.ENABLE_PER_FOLD_SCALING:
         print(f"\nApplying scaling with '{cfg.SCALER_KIND}' scaler to the full development set...")
         
-        numeric_cols = [col for col in (cfg.CONTEXT_FEATURES + cfg.DYNAMIC_FEATURES) if col in train_df.columns]
+        numeric_cols = available_context_features + available_dynamic_features
+        numeric_cols = [col for col in numeric_cols if pd.api.types.is_numeric_dtype(train_df[col])]
         
         if cfg.SCALER_KIND == "robust": scaler = RobustScaler()
         elif cfg.SCALER_KIND == "standard": scaler = StandardScaler()
@@ -106,18 +113,18 @@ def main():
     
     train_dataset = AirflowSequenceDataset(
         train_df, CNN_DATASET_DIR, 
-        context_feature_cols=cfg.CONTEXT_FEATURES,
-        dynamic_feature_cols=cfg.DYNAMIC_FEATURES,
+        context_feature_cols=available_context_features,
+        dynamic_feature_cols=available_dynamic_features,
         transform=train_transform,
-        is_train=True # Enable augmentations
+        is_train=True
     )
     train_loader = DataLoader(train_dataset, batch_size=cfg.BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
     
     # 5. Initialize Model, Loss, and Optimizer
     if args.model_type == 'lstm':
         model = UltimateHybridRegressor(
-            num_context_features=len(cfg.CONTEXT_FEATURES),
-            num_dynamic_features=len(cfg.DYNAMIC_FEATURES),
+            num_context_features=len(available_context_features),
+            num_dynamic_features=len(available_dynamic_features),
             cnn_in_channels=args.in_channels,
             lstm_hidden_size=cfg.OPTUNA_PARAMS['lstm_hidden_size'],
             lstm_layers=cfg.OPTUNA_PARAMS['lstm_layers']
