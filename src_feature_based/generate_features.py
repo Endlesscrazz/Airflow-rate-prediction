@@ -11,11 +11,9 @@ from tqdm import tqdm
 import fnmatch
 import numpy as np
 
-# --- Add project root to path for imports ---
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
-# --- Import Your Project Modules ---
 from src_feature_based import config as cfg
 from src_feature_based import data_utils, feature_engineering
 
@@ -59,13 +57,9 @@ def main():
                     except Exception:
                         continue
                 
-                # --- START OF CHANGE: New Mask Finding Logic ---
-                # Construct the path to the mask directory based on the new structure
                 mask_search_dir = os.path.join(cfg.RAW_MASK_PARENT_DIR, d_conf["dataset_subfolder"], video_id)
-                # --- END OF CHANGE ---
 
                 if os.path.isdir(mask_search_dir):
-                    # Find any .npy file in that directory, assuming they are all masks
                     mask_files = fnmatch.filter(os.listdir(mask_search_dir), "*.npy")
                     if mask_files and video_id in video_to_masks_map:
                         for mask_filename in mask_files:
@@ -84,10 +78,7 @@ def main():
     
     for sample_info in tqdm(all_samples_info_list, desc="Extracting features"):
         try:
-            # --- START OF FIX ---
-            # The feature_engineering module now automatically uses the full list
-            # from its own config, so we don't need to override anything here.
-            # We just call the high-level wrapper.
+
             extracted_features = feature_engineering.calculate_features_from_video(
                 sample_info["mat_filepath"],
                 sample_info["mask_paths"]

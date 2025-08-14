@@ -108,10 +108,18 @@ def main():
         y_dev_final = pd.Series(y_dev_scaled, index=y_dev_final.index, name=y_dev_final.name)
     
     # 5. Run Hyperparameter Tuning via Cross-Validation
+    scoring_metrics = {
+        'r2': 'r2',
+        'neg_mean_absolute_error': 'neg_mean_absolute_error',
+        'neg_root_mean_squared_error': 'neg_root_mean_squared_error'
+    }
+    
     cv_splitter = GroupKFold(n_splits=cfg.CV_FOLDS)
     models, param_grids = modeling.get_models_and_grids()
     best_estimators = {}
-    cv_results = {}
+    
+    # Use a DataFrame to store all results
+    all_cv_results = pd.DataFrame(columns=['R2', 'MAE', 'RMSE'])
 
     for model_name, model in models.items():
         print(f"\n--- Tuning {model_name} ---")
@@ -119,29 +127,54 @@ def main():
         pipeline = modeling.build_pipeline(model)
         param_grid = param_grids.get(model_name, {})
         
+        # --- MODIFICATION: Use the new scoring dict and refit=True ---
         grid_search = GridSearchCV(
             estimator=pipeline,
             param_grid=param_grid,
             cv=cv_splitter,
-            scoring='r2',
+            scoring=scoring_metrics,
+            refit='r2',  # <-- Still optimizes for R², but tracks all others
             n_jobs=-1,
-            verbose=1
+            verbose=1,
+            return_train_score=True
         )
 
         grid_search.fit(X_dev_final, y_dev_final, groups=groups_dev_final)
         
-        print(f"Best CV R² score for {model_name}: {grid_search.best_score_:.4f}")
+        # --- MODIFICATION: Extract and log all metrics ---
+        best_index = grid_search.best_index_
+        results = grid_search.cv_results_
+        
+        best_r2 = results['mean_test_r2'][best_index]
+        best_mae = -results['mean_test_neg_mean_absolute_error'][best_index]
+        best_rmse = -results['mean_test_neg_root_mean_squared_error'][best_index]
+
+        # If target was scaled, we need to un-scale MAE and RMSE to interpret them
+        if y_scaler:
+            scale_factor = y_scaler.data_range_[0]
+            best_mae *= scale_factor
+            best_rmse *= scale_factor
+        
+        print(f"Best CV Scores for {model_name}:")
+        print(f"  - R²:   {best_r2:.4f}")
+        print(f"  - MAE:  {best_mae:.4f} L/min")
+        print(f"  - RMSE: {best_rmse:.4f} L/min")
         print(f"Best parameters: {grid_search.best_params_}")
+
         best_estimators[model_name] = grid_search.best_estimator_
-        cv_results[model_name] = grid_search.best_score_
+        all_cv_results.loc[model_name] = [best_r2, best_mae, best_rmse]
 
-    # 6. Finalize and Save Best Model
-    best_model_name = max(cv_results, key=cv_results.get)
-
+    # --- MODIFICATION: More informative model finalization ---
+    print("\n--- Cross-Validation Summary ---")
+    print(all_cv_results.sort_values(by='R2', ascending=False))
+    
+    # The best model is still chosen based on the highest R²
+    best_model_name = all_cv_results['R2'].idxmax()
     final_model_pipeline = best_estimators[best_model_name]
     
-    print(f"\n--- Best model from CV is: {best_model_name} (Avg R² = {cv_results[best_model_name]:.4f}) ---")
-    
+    print(f"\n--- Best model from CV is: {best_model_name} (Avg R² = {all_cv_results.loc[best_model_name, 'R2']:.4f}) ---")
+
+    # 6. Finalize and Save Best Model
     model_save_dir = os.path.join(cfg.OUTPUT_DIR, "trained_cv_model")
     os.makedirs(model_save_dir, exist_ok=True)
     
@@ -156,19 +189,16 @@ def main():
         joblib.dump(y_scaler, scaler_save_path)
         print(f"Saved final target scaler to: {scaler_save_path}")
 
+    # --- (Plotting section remains the same) ---
     print("\n--- Generating Diagnostic Plots for the Best Model ---")
-    
     plots_dir = os.path.join(cfg.OUTPUT_DIR, "plots")
     os.makedirs(plots_dir, exist_ok=True)
 
-    # 1. Learning Curve
     lc_title = f"Learning Curve for {best_model_name}"
     lc_path = os.path.join(plots_dir, f"learning_curve_{best_model_name}.png")
     plotting.plot_learning_curves(
         clone(final_model_pipeline), lc_title, X_dev, y_dev_original, groups=groups_dev, save_path=lc_path
     )
-
-    # 2. Feature Importance Plot (for tree-based models)
     final_model_instance = final_model_pipeline.named_steps['model']
     fi_title = f"Feature Importance for {best_model_name}"
     fi_path = os.path.join(plots_dir, f"feature_importance_{best_model_name}.png")
@@ -178,3 +208,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# python -m src_feature_based.train_feature_models_cv

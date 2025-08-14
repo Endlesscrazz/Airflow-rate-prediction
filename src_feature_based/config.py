@@ -11,6 +11,8 @@ RAW_DATA_ROOT = os.path.join(PROJECT_ROOT, "datasets")
 # Path to the parent directory containing corresponding .npy mask files
 RAW_MASK_PARENT_DIR = os.path.join(PROJECT_ROOT, "Output_SAM/datasets")
 # Path to the ground truth airflow data. We'll look for it in the root.
+#GROUND_TRUTH_CSV_PATH = os.path.join(PROJECT_ROOT, "airflow_ground_truth_combined.csv")
+# for gypsum only
 GROUND_TRUTH_CSV_PATH = os.path.join(PROJECT_ROOT, "airflow_ground_truth.csv")
 # Output directory for all generated files for this pipeline.
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output_feature_based")
@@ -20,6 +22,9 @@ DATASET_CONFIGS = {
     "gypsum_0716": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07162025_noshutter"},
     "gypsum_0725": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07252025_noshutter"},
     "gypsum_0729": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07292025_noshutter"},
+    # "brick_cladding_0616": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0616_2025_noshutter"},
+    # "brick_cladding_0805": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0805_2025_noshutter"},
+    # "brick_cladding_0808": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0808_2025_noshutter"},
 }
 
 # --- Feature Engineering Parameters ---
@@ -42,11 +47,13 @@ SELECTED_FEATURES = [
     'hotspot_area_log',
     'hotspot_avg_temp_change_rate_initial_norm',
     'hotspot_avg_temp_change_magnitude_initial',
-    'peak_pixel_temp_change_rate_initial',
+    #'peak_pixel_temp_change_rate_initial',
     'temp_mean_avg_initial',
     'temp_std_avg_initial',
     'temp_min_overall_initial',
     'temp_max_overall_initial',
+    #'material_brick_cladding',
+    #'material_gypsum'
     #'overall_mean_deltaT'
 ]
 # Feature transformation flags used during feature generation

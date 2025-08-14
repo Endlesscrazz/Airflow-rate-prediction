@@ -1,14 +1,14 @@
 # scripts/evaluate_feature_model.py
 """
 Evaluates the final feature-based model on the unseen hold-out set.
-Includes logic to handle scaled targets.
+Calculates R-squared, MAE, and RMSE.
 """
 import os
 import sys
 import pandas as pd
 import numpy as np
 import joblib
-from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error # <-- Import MAE
 import matplotlib.pyplot as plt
 import argparse
 
@@ -52,7 +52,7 @@ def main():
         X_transformed_holdout['hotspot_area_log'] = np.log1p(X_raw_holdout['hotspot_area'])
     if 'hotspot_avg_temp_change_rate_initial' in X_raw_holdout.columns and cfg.NORMALIZE_AVG_RATE_INITIAL:
         X_transformed_holdout['hotspot_avg_temp_change_rate_initial_norm'] = X_raw_holdout.apply(
-            lambda r: r['hotspot_avg_temp_change_rate_initial'] / r['delta_T'] if r['delta_T'] != 0 else np.nan, axis=1
+            lambda r: r['hotspot_avg_temp_change_rate_initial'] / r['delta_T'] if r['delta_T'] != 0 and pd.notna(r['hotspot_avg_temp_change_rate_initial']) else np.nan, axis=1
         )
     
     special_raw = ['delta_T', 'hotspot_area', 'hotspot_avg_temp_change_rate_initial', 'material']
@@ -61,9 +61,9 @@ def main():
     
     X_transformed_holdout = pd.concat([X_transformed_holdout, pd.get_dummies(X_raw_holdout['material'], prefix='material', dtype=int)], axis=1)
 
-    # Select the same features used for training
-    X_holdout = X_transformed_holdout[cfg.SELECTED_FEATURES]
-    
+    # Reorder columns to match the training order to prevent warnings
+    X_holdout = X_transformed_holdout.reindex(columns=cfg.SELECTED_FEATURES)
+
     # 2. Make Predictions
     y_pred_scaled = final_model.predict(X_holdout)
     
@@ -78,30 +78,32 @@ def main():
         y_scaler = joblib.load(scaler_path)
         y_pred = y_scaler.inverse_transform(y_pred_scaled.reshape(-1, 1)).flatten()
     
-    # 4. Calculate and Print Metrics
+    # 4. --- MODIFIED: Calculate and Print All Metrics ---
     r2 = r2_score(y_true, y_pred)
+    mae = mean_absolute_error(y_true, y_pred)
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     
     print("\n--- Hold-Out Set Performance ---")
     print(f"R-squared (R²): {r2:.4f}")
-    print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
+    print(f"Mean Absolute Error (MAE): {mae:.4f} L/min")
+    print(f"Root Mean Squared Error (RMSE): {rmse:.4f} L/min")
 
-    # 5. Plotting
-    plt.figure(figsize=(8, 8))
-    plt.scatter(y_true, y_pred, alpha=0.6, edgecolors='k')
-    plt.plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--', lw=2, label='Perfect Prediction')
-    plt.xlabel("True Airflow Rate (L/min)")
-    plt.ylabel("Predicted Airflow Rate (L/min)")
-    plt.title(f"Hold-Out Set: True vs. Predicted (R² = {r2:.4f})")
-    plt.legend()
-    plt.grid(True)
-    plot_path = os.path.join(cfg.OUTPUT_DIR, "plots", "holdout_performance_plot.png")
-    plot_title = f"Hold-Out Set: True vs. Predicted (R² = {r2:.4f})"
-    plotting.plot_actual_vs_predicted(
-        y_true, y_pred, plot_title, plot_path, material_labels=holdout_df['material']
+    # 5. --- MODIFIED: Plotting with All Metrics in Title ---
+    plots_dir = os.path.join(cfg.OUTPUT_DIR, "plots")
+    os.makedirs(plots_dir, exist_ok=True)
+    
+    plot_path = os.path.join(plots_dir, f"holdout_performance_plot_{args.best_model_name}.png")
+    plot_title = (
+        f"Hold-Out Set Performance for {args.best_model_name}\n"
+        f"R² = {r2:.4f}  |  MAE = {mae:.4f} L/min  |  RMSE = {rmse:.4f} L/min"
     )
+
+    plotting.plot_actual_vs_predicted(
+        y_true.to_numpy(), y_pred, plot_title, plot_path, material_labels=holdout_df['material']
+    )
+    print(f"\nSaved performance plot to: {plot_path}")
 
 if __name__ == "__main__":
     main()
-
+    
 # python -m src_feature_based.eval_holdout MLPRegressor
