@@ -101,6 +101,10 @@ def main():
     
     # 4. Scale Target (Optional)
     y_scaler = None
+
+    y_dev_log = np.log1p(y_dev_final)
+    print(f"\nApplied log1p transformation to the target variable.")
+
     if cfg.ENABLE_TARGET_SCALING:
         print("\nTarget scaling enabled. Fitting MinMaxScaler...")
         y_scaler = MinMaxScaler()
@@ -127,42 +131,37 @@ def main():
         pipeline = modeling.build_pipeline(model)
         param_grid = param_grids.get(model_name, {})
         
-        # --- MODIFICATION: Use the new scoring dict and refit=True ---
         grid_search = GridSearchCV(
             estimator=pipeline,
             param_grid=param_grid,
             cv=cv_splitter,
             scoring=scoring_metrics,
-            refit='r2',  # <-- Still optimizes for R², but tracks all others
+            refit='r2',
             n_jobs=-1,
             verbose=1,
             return_train_score=True
         )
 
-        grid_search.fit(X_dev_final, y_dev_final, groups=groups_dev_final)
+        # --- KEY CHANGE: Fit on the log-transformed target ---
+        grid_search.fit(X_dev_final, y_dev_log, groups=groups_dev_final)
         
-        # --- MODIFICATION: Extract and log all metrics ---
+        # --- MODIFICATION: Report scores on the TRANSFORMED scale ---
+        # Note: MAE and RMSE are now in log-space and not directly interpretable in L/min
         best_index = grid_search.best_index_
         results = grid_search.cv_results_
         
         best_r2 = results['mean_test_r2'][best_index]
-        best_mae = -results['mean_test_neg_mean_absolute_error'][best_index]
-        best_rmse = -results['mean_test_neg_root_mean_squared_error'][best_index]
+        best_mae_log = -results['mean_test_neg_mean_absolute_error'][best_index]
+        best_rmse_log = -results['mean_test_neg_root_mean_squared_error'][best_index]
 
-        # If target was scaled, we need to un-scale MAE and RMSE to interpret them
-        if y_scaler:
-            scale_factor = y_scaler.data_range_[0]
-            best_mae *= scale_factor
-            best_rmse *= scale_factor
-        
-        print(f"Best CV Scores for {model_name}:")
+        print(f"Best CV Scores for {model_name} (on log-transformed target):")
         print(f"  - R²:   {best_r2:.4f}")
-        print(f"  - MAE:  {best_mae:.4f} L/min")
-        print(f"  - RMSE: {best_rmse:.4f} L/min")
+        print(f"  - MAE (log-space):  {best_mae_log:.4f}")
+        print(f"  - RMSE (log-space): {best_rmse_log:.4f}")
         print(f"Best parameters: {grid_search.best_params_}")
-
+        
         best_estimators[model_name] = grid_search.best_estimator_
-        all_cv_results.loc[model_name] = [best_r2, best_mae, best_rmse]
+        all_cv_results.loc[model_name] = [best_r2, best_mae_log, best_rmse_log]
 
     # --- MODIFICATION: More informative model finalization ---
     print("\n--- Cross-Validation Summary ---")

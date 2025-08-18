@@ -14,17 +14,15 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import GroupKFold
 from torchvision import transforms
+import itertools
 
-# --- Import project modules ---
-# Add the project root to the Python path to allow absolute imports
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
 from src_cnn.cnn_models import UltimateHybridRegressor
 from src_cnn.cnn_utils import AirflowSequenceDataset
 from src_cnn import config as cfg
-# Import the reusable training/evaluation functions from the CV script
-from src_cnn.train_cv import train_one_epoch, evaluate
+from src_cnn.train import train_one_epoch, evaluate
 
 def objective(trial, args):
     """
@@ -47,55 +45,67 @@ def objective(trial, args):
     
     gkf = GroupKFold(n_splits=args.total_folds)
     train_idx, val_idx = list(gkf.split(X, y, groups))[args.fold]
-    train_df = df_metadata.iloc[train_idx]
-    val_df = df_metadata.iloc[val_idx]
+    train_df = df_metadata.iloc[train_idx].copy()
+    val_df = df_metadata.iloc[val_idx].copy()
     
-    # --- Data Transforms (Hardcoded for 1-channel thermal as this is the target) ---
-    NORM_MEAN, NORM_STD = [0.5], [0.5]
+    available_context_features = [col for col in cfg.CONTEXT_FEATURES if col in train_df.columns]
+    available_dynamic_features = [col for col in cfg.DYNAMIC_FEATURES if col in train_df.columns]
+
+    # --- Data Transforms (Now dynamic based on in_channels) ---
+    norm_params = cfg.NORM_CONSTANTS.get(args.in_channels)
+    if not norm_params: raise ValueError(f"Normalization constants not defined for {args.in_channels} channels.")
+
     train_transform = transforms.Compose([
         transforms.Lambda(lambda x: x + 0.05 * torch.randn_like(x)),
-        transforms.RandomErasing(p=0.5, scale=(0.02, 0.2), value=0),
-        transforms.Normalize(mean=NORM_MEAN, std=NORM_STD)
+        transforms.RandomErasing(p=0.25, scale=(0.02, 0.1), ratio=(0.3, 3.3), value=0),
+        transforms.Normalize(mean=norm_params["mean"], std=norm_params["std"])
     ])
-    val_transform = transforms.Compose([transforms.Normalize(mean=NORM_MEAN, std=NORM_STD)])
+    val_transform = transforms.Compose([transforms.Normalize(mean=norm_params["mean"], std=norm_params["std"])])
     
-    train_dataset = AirflowSequenceDataset(train_df, args.dataset_dir, cfg.CONTEXT_FEATURES, cfg.DYNAMIC_FEATURES, train_transform)
-    val_dataset = AirflowSequenceDataset(val_df, args.dataset_dir, cfg.CONTEXT_FEATURES, cfg.DYNAMIC_FEATURES, val_transform)
+    train_dataset = AirflowSequenceDataset(train_df, args.dataset_dir, available_context_features, available_dynamic_features, train_transform)
+    val_dataset = AirflowSequenceDataset(val_df, args.dataset_dir, available_context_features, available_dynamic_features, val_transform)
     
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2, pin_memory=True)
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2, pin_memory=True)
 
     # --- Model Initialization with Trial Hyperparameters ---
     model = UltimateHybridRegressor(
-        num_context_features=len(cfg.CONTEXT_FEATURES),
-        num_dynamic_features=len(cfg.DYNAMIC_FEATURES),
-        cnn_in_channels=1, # Hardcoded for 1-channel thermal
+        num_context_features=len(available_context_features),
+        num_dynamic_features=len(available_dynamic_features),
+        cnn_in_channels=args.in_channels,
         lstm_hidden_size=lstm_hidden_size,
         lstm_layers=lstm_layers
     ).to(cfg.DEVICE)
     
     model.head[2] = torch.nn.Dropout(dropout_rate)
     criterion = torch.nn.MSELoss()
-    
+
+    param_groups = [{'params': model.cnn[7].parameters(), 'lr': lr / 10}]
+    main_model_params = itertools.chain(model.lstm.parameters(), model.attention.parameters())
+    param_groups.append({'params': main_model_params, 'lr': lr})
+    shared_main_params = itertools.chain(model.context_mlp.parameters(), model.dynamic_mlp.parameters(), model.head.parameters())
+    param_groups.append({'params': shared_main_params, 'lr': lr})
+
     if optimizer_name == "AdamW":
-        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        optimizer = optim.AdamW(param_groups, weight_decay=weight_decay)
     else:
-        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        optimizer = optim.Adam(param_groups, weight_decay=weight_decay)
 
     # --- Training Loop with Pruning ---
-    best_val_r2 = -float('inf')
+    best_val_rmse = float('inf') 
     for epoch in range(args.num_epochs):
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, cfg.DEVICE)
-        val_loss, val_r2, val_rmse = evaluate(model, val_loader, criterion, cfg.DEVICE)
-        
-        if val_r2 > best_val_r2:
-            best_val_r2 = val_r2
 
-        trial.report(val_r2, epoch)
+        val_loss, val_rmse, val_mae, val_r2 = evaluate(model, val_loader, criterion, cfg.DEVICE)
+        
+        if val_rmse < best_val_rmse:
+            best_val_rmse = val_rmse
+
+        trial.report(val_rmse, epoch)
         if trial.should_prune():
             raise optuna.exceptions.TrialPruned()
 
-    return best_val_r2
+    return best_val_rmse
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Optuna hyperparameter search.")
@@ -103,20 +113,17 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=75, help="Number of epochs per trial.")
     parser.add_argument("--fold", type=int, default=0, help="Which CV fold to use for hyperparameter tuning.")
     
-    # Use config for defaults where possible
+    parser.add_argument("--in_channels", type=int, required=True, help="Number of input channels for the CNN.")
+    parser.add_argument("--dataset_dir", type=str, required=True, help="Path to the root directory of the dataset.")
+    parser.add_argument("--metadata_path", type=str, required=True, help="Path to the metadata.csv for the dataset.")
     parser.add_argument("--batch_size", type=int, default=cfg.BATCH_SIZE)
-    parser.add_argument("--total_folds", type=int, default=5)
-    
-    # Define the target dataset for this specific search
-    DATASET_DIR = os.path.join(cfg.PROCESSED_DATASET_DIR, "dataset_1ch_thermal")
-    parser.add_argument("--dataset_dir", type=str, default=DATASET_DIR)
-    parser.add_argument("--metadata_path", type=str, default=os.path.join(DATASET_DIR, "metadata.csv"))
+    parser.add_argument("--total_folds", type=int, default=cfg.CV_FOLDS)
     
     args = parser.parse_args()
 
     study = optuna.create_study(
-        direction="maximize",
-        pruner=optuna.pruners.MedianPruner(n_warmup_steps=10)
+        direction="minimize", 
+        pruner=optuna.pruners.MedianPruner(n_warmup_steps=10, n_min_trials=5)
     )
     
     study.optimize(lambda trial: objective(trial, args), n_trials=args.n_trials)
@@ -125,7 +132,8 @@ if __name__ == "__main__":
     print(f"Number of finished trials: {len(study.trials)}")
     print("\nBest trial:")
     trial = study.best_trial
-    print(f"  Value (Best R²): {trial.value:.4f}")
+    # <-- MODIFIED: Report the best RMSE
+    print(f"  Value (Best RMSE): {trial.value:.4f}")
     print("  Params: ")
     for key, value in trial.params.items():
         print(f"    {key}: {value}")

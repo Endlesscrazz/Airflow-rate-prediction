@@ -14,7 +14,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from sklearn.model_selection import GroupKFold
-from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error # <-- MODIFIED: Added MAE
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from tqdm import tqdm
 import random
@@ -66,9 +66,16 @@ def evaluate(model, dataloader, criterion, device):
             all_targets.extend(targets.cpu().numpy())
             all_outputs.extend(outputs.cpu().numpy())
     epoch_loss = running_loss / len(dataloader.dataset)
+
+    all_outputs = np.expm1(all_outputs)
+    all_targets = np.expm1(all_targets)
+    
+    # Calculate all metrics 
     r2 = r2_score(all_targets, all_outputs)
     rmse = np.sqrt(mean_squared_error(all_targets, all_outputs))
-    return epoch_loss, r2, rmse
+    mae = mean_absolute_error(all_targets, all_outputs)
+    
+    return epoch_loss, rmse, mae, r2 
 
 # --- Main Execution ---
 def main():
@@ -98,7 +105,7 @@ def main():
         
     MODEL_SAVE_DIR = f"trained_models_{model_name_tag}_CV"
     RESULTS_SAVE_DIR = f"results_{model_name_tag}_CV"
-    SCALER_SAVE_DIR = os.path.join(MODEL_SAVE_DIR, "scalers") # New directory for scalers
+    SCALER_SAVE_DIR = os.path.join(MODEL_SAVE_DIR, "scalers")
 
     print(f"--- Starting CNN-based Model Training (Cross-Validation) ---")
     print(f"Model Type: {args.model_type.upper()} | Fold: {current_fold + 1}/{n_splits} | Channels: {args.in_channels}")
@@ -121,7 +128,6 @@ def main():
     print(f"\n----- RUNNING FOLD {current_fold + 1}/{n_splits} -----")
     print(f"Train set size: {len(train_idx)}, Validation set size: {len(val_idx)}")
 
-    # Use .copy() to prevent SettingWithCopyWarning when scaling
     train_df = df_metadata.iloc[train_idx].copy()
     val_df = df_metadata.iloc[val_idx].copy()
 
@@ -134,9 +140,7 @@ def main():
     if cfg.ENABLE_PER_FOLD_SCALING:
         print(f"\nApplying per-fold scaling with '{cfg.SCALER_KIND}' scaler...")
         
-        # Identify all numeric tabular columns to be scaled
         numeric_cols = available_context_features + available_dynamic_features
-        # Ensure we only try to scale columns that actually exist and are numeric
         numeric_cols = [col for col in numeric_cols if col in train_df.columns and pd.api.types.is_numeric_dtype(train_df[col])]
         
         if cfg.SCALER_KIND == "robust":
@@ -146,9 +150,7 @@ def main():
         else:
             raise ValueError(f"Unknown scaler kind: {cfg.SCALER_KIND}")
 
-        # Fit scaler ONLY on the training data for this fold
         train_df[numeric_cols] = scaler.fit_transform(train_df[numeric_cols])
-        # Transform the validation data using the same fitted scaler
         val_df[numeric_cols] = scaler.transform(val_df[numeric_cols])
         
         if cfg.SAVE_SCALERS:
@@ -192,8 +194,8 @@ def main():
         model.head[2] = torch.nn.Dropout(cfg.OPTUNA_PARAMS['dropout_rate'])
     elif args.model_type == 'avg':
         model = SimplifiedCnnAvgRegressor(
-            num_context_features=len(cfg.CONTEXT_FEATURES),
-            num_dynamic_features=len(cfg.DYNAMIC_FEATURES),
+            num_context_features=len(available_context_features), # <-- Corrected from previous discussion
+            num_dynamic_features=len(available_dynamic_features), # <-- Corrected from previous discussion
             cnn_in_channels=args.in_channels
         ).to(cfg.DEVICE)
     else:
@@ -212,38 +214,52 @@ def main():
     optimizer = optim.AdamW(param_groups, weight_decay=cfg.OPTUNA_PARAMS['weight_decay'])
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=10)
-    best_val_r2 = -float('inf')
+    
+    # --- MODIFIED: Track best RMSE (lower is better) ---
+    best_val_rmse = float('inf') 
+    
     model_save_path = os.path.join(MODEL_SAVE_DIR, f"best_model_fold_{current_fold}.pth")
     os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
     # 7. Training Loop
     for epoch in tqdm(range(cfg.NUM_EPOCHS_CV), desc=f"Training Fold {current_fold+1}", disable=(not is_interactive)):
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, cfg.DEVICE)
-        val_loss, val_r2, val_rmse = evaluate(model, val_loader, criterion, cfg.DEVICE)
+        
+        # --- MODIFIED: Unpack new metrics ---
+        val_loss, val_rmse, val_mae, val_r2 = evaluate(model, val_loader, criterion, cfg.DEVICE)
         scheduler.step(val_loss)
 
         if (epoch + 1) % 5 == 0 or epoch == 0:
              current_lr = optimizer.param_groups[-1]['lr']
-             tqdm.write(f"Epoch {epoch+1:03d}/{cfg.NUM_EPOCHS_CV} | Train Loss: {train_loss:.4f} | Val R²: {val_r2:.4f} | LR: {current_lr:.1e}")
+             # --- MODIFIED: Update logging ---
+             tqdm.write(f"Epoch {epoch+1:03d}/{cfg.NUM_EPOCHS_CV} | Train Loss: {train_loss:.4f} | Val RMSE: {val_rmse:.4f} | Val MAE: {val_mae:.4f} | Val R²: {val_r2:.4f} | LR: {current_lr:.1e}")
 
-        if val_r2 > best_val_r2:
-            best_val_r2 = val_r2
+        # --- MODIFIED: Save model based on best validation RMSE ---
+        if val_rmse < best_val_rmse:
+            best_val_rmse = val_rmse
             torch.save(model.state_dict(), model_save_path)
 
     # 8. Report Final Results for this Fold
     print(f"\n----- Finished Fold {current_fold + 1} -----")
-    print(f"Loading best model from: {model_save_path}")
+    print(f"Loading best model from: {model_save_path} (Best Val RMSE: {best_val_rmse:.4f})")
     model.load_state_dict(torch.load(model_save_path))
     
-    final_loss, final_r2, final_rmse = evaluate(model, val_loader, criterion, cfg.DEVICE)
+    # --- MODIFIED: Unpack and report final metrics ---
+    final_loss, final_rmse, final_mae, final_r2 = evaluate(model, val_loader, criterion, cfg.DEVICE)
 
-    results_df = pd.DataFrame([{'fold': current_fold, 'r2': final_r2, 'rmse': final_rmse}])
+    results_df = pd.DataFrame([{
+        'fold': current_fold, 
+        'rmse': final_rmse, 
+        'mae': final_mae,
+        'r2': final_r2
+    }])
     os.makedirs(RESULTS_SAVE_DIR, exist_ok=True)
     results_csv_path = os.path.join(RESULTS_SAVE_DIR, f"fold_{current_fold}_results.csv")
     results_df.to_csv(results_csv_path, index=False)
     
-    print(f"Fold {current_fold + 1} Final R²: {final_r2:.4f}, RMSE: {final_rmse:.4f}")
+    print(f"Fold {current_fold + 1} Final RMSE: {final_rmse:.4f}, MAE: {final_mae:.4f}, R²: {final_r2:.4f}")
     print(f"Results for this fold saved to: {results_csv_path}")
 
 if __name__ == "__main__":
     main()
+    

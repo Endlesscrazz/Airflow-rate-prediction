@@ -85,6 +85,8 @@ class AirflowSequenceDataset(Dataset):
         if self.task == 'classification':
             target = torch.tensor(sample_row['airflow_category'], dtype=torch.long)
         else:
-            target = torch.tensor(sample_row['airflow_rate'], dtype=torch.float32)
+            # log transformation on target variable
+            log_target = np.log1p(sample_row['airflow_rate'])
+            target = torch.tensor(log_target, dtype=torch.float32)
 
         return image_sequence_tensor, context_tensor, dynamic_tensor, target

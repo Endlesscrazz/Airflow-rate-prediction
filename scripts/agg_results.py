@@ -33,11 +33,8 @@ def main():
     model_name_tag = f"{args.model_type}_{args.in_channels}ch"
     if args.optuna_tuned:
         model_name_tag += "_optuna"
-    # --- START OF CHANGE: Add the scaling tag to the path ---
     if args.scaled:
-        # We get the scaler kind directly from the config file for consistency
         model_name_tag += f"_{cfg.SCALER_KIND}scaled"
-    # --- END OF CHANGE ---
     RESULTS_DIR = f"results_{model_name_tag}_CV"
     
     print(f"--- Aggregating results from: '{RESULTS_DIR}' ---")
@@ -46,7 +43,6 @@ def main():
         print(f"\nFATAL ERROR: Results directory not found at '{RESULTS_DIR}'")
         sys.exit(1)
 
-    # ... (The rest of the script is correct and does not need changes) ...
     all_dfs = []
     for i in range(args.total_folds):
         path = os.path.join(RESULTS_DIR, f"fold_{i}_results.csv")
@@ -68,10 +64,13 @@ def main():
     std_r2 = final_results['r2'].std()
     mean_rmse = final_results['rmse'].mean()
     std_rmse = final_results['rmse'].std()
+    mean_mae = final_results['mae'].mean()
+    std_mae = final_results['mae'].std()
     
     print("\n--- Final Summary ---")
     print(f"Average R²   : {mean_r2:.4f} ± {std_r2:.4f}")
     print(f"Average RMSE : {mean_rmse:.4f} ± {std_rmse:.4f}")
+    print(f"Average MAE : {mean_mae:.4f} ± {std_mae:.4f}")
     print(f"(Based on {len(final_results)} completed folds out of {args.total_folds})")
 
 if __name__ == "__main__":

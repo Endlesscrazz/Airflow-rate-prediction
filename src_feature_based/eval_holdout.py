@@ -8,8 +8,7 @@ import sys
 import pandas as pd
 import numpy as np
 import joblib
-from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error # <-- Import MAE
-import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 import argparse
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -31,7 +30,6 @@ def main():
     holdout_path = os.path.join(cfg.OUTPUT_DIR, "holdout_features.csv")
     model_dir = os.path.join(cfg.OUTPUT_DIR, "trained_cv_model")
     model_path = os.path.join(model_dir, f"final_model_{args.best_model_name}.joblib")
-
     
     if not (os.path.exists(holdout_path) and os.path.exists(model_path)):
         print("FATAL ERROR: Holdout data or final model not found. Please run training script first.")
@@ -61,34 +59,30 @@ def main():
     
     X_transformed_holdout = pd.concat([X_transformed_holdout, pd.get_dummies(X_raw_holdout['material'], prefix='material', dtype=int)], axis=1)
 
-    # Reorder columns to match the training order to prevent warnings
     X_holdout = X_transformed_holdout.reindex(columns=cfg.SELECTED_FEATURES)
 
-    # 2. Make Predictions
-    y_pred_scaled = final_model.predict(X_holdout)
+    # 2. Make Predictions 
+    y_pred_transformed = final_model.predict(X_holdout)
     
-    # 3. Inverse Transform Predictions if scaling was used
-    y_pred = y_pred_scaled 
+    # 3. Inverse Transform Predictions ---
+    y_pred = y_pred_transformed 
+    
     if cfg.ENABLE_TARGET_SCALING:
-        print("\nTarget scaling was enabled. Inverse transforming predictions...")
-        scaler_path = os.path.join(model_dir, f"final_target_scaler_{args.best_model_name}.joblib")
-        if not os.path.exists(scaler_path):
-            print(f"FATAL ERROR: Target scaler not found at {scaler_path}")
-            sys.exit(1)
-        y_scaler = joblib.load(scaler_path)
-        y_pred = y_scaler.inverse_transform(y_pred_scaled.reshape(-1, 1)).flatten()
+        # If this flag is true, we assume log transform was used during training.
+        print("\nTarget transformation was enabled. Applying inverse transform (expm1)...")
+        y_pred = np.expm1(y_pred_transformed)
     
-    # 4. --- MODIFIED: Calculate and Print All Metrics ---
+    # 4. Calculate and Print All Metrics
     r2 = r2_score(y_true, y_pred)
     mae = mean_absolute_error(y_true, y_pred)
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     
-    print("\n--- Hold-Out Set Performance ---")
+    print("\n--- Hold-Out Set Performance (Original Scale) ---")
     print(f"R-squared (R²): {r2:.4f}")
     print(f"Mean Absolute Error (MAE): {mae:.4f} L/min")
     print(f"Root Mean Squared Error (RMSE): {rmse:.4f} L/min")
 
-    # 5. --- MODIFIED: Plotting with All Metrics in Title ---
+    # 5. Plotting with All Metrics in Title
     plots_dir = os.path.join(cfg.OUTPUT_DIR, "plots")
     os.makedirs(plots_dir, exist_ok=True)
     

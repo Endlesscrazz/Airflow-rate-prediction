@@ -79,7 +79,7 @@ echo "--- Starting Training for Fold ${SLURM_ARRAY_TASK_ID} ---"
 TOTAL_FOLDS=$((${SLURM_ARRAY_TASK_MAX} + 1))
 echo "Running with Fold: ${SLURM_ARRAY_TASK_ID}, Total Folds: ${TOTAL_FOLDS}"
 
-python -m src_cnn.train_cv \
+python -m src_cnn.train \
     --fold ${SLURM_ARRAY_TASK_ID} \
     --total_folds ${TOTAL_FOLDS} \
     --model_type "${MODEL_TYPE}" \
