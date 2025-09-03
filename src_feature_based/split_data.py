@@ -45,7 +45,7 @@ def main():
     if n_splits < 2:
         raise ValueError("HOLDOUT_SIZE is too large to create a valid split.")
 
-    sgkf = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=45)
+    sgkf = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=41)
 
     try:
         dev_idx, holdout_idx = next(sgkf.split(X=df, y=airflow_bins, groups=groups))

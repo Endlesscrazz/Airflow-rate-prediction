@@ -210,7 +210,9 @@ def main(args):
         print(f"Error loading SAM model: {e}", file=sys.stderr); sys.exit(1)
 
     for root, _, files in os.walk(args.dataset_dir):
-        for video_filename in tqdm(fnmatch.filter(files, '*.mat'), desc="Processing Videos"):
+        # to ignore macos metadata files:
+        mat_files = [f for f in fnmatch.filter(files, '*.mat') if not f.startswith('._')]
+        for video_filename in tqdm(mat_files, desc="Processing Videos"):
             video_path = os.path.join(root, video_filename)
             base_filename = os.path.splitext(video_filename)[0]
             
@@ -324,4 +326,9 @@ python -m scripts.run_SAM --dataset_dir datasets/Fluke_Gypsum_07292025_noshutter
 python -m scripts.run_SAM --dataset_dir datasets/Fluke_BrickCladding_2holes_0808_2025_noshutter \
     --base_output_dir output_SAM/datasets/Fluke_BrickCladding_2holes_0808_2025_noshutter \
     --num_leaks 2 
+
+python -m scripts.run_SAM --dataset_dir /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_08132025_2holes_noshutter \
+    --base_output_dir output_SAM/datasets/Fluke_HardyBoard_08132025_2holes_noshutter \
+    --num_leaks 2 \
+    --roi_method border  
 """

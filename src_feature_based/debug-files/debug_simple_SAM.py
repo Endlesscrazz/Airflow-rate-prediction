@@ -179,6 +179,7 @@ def create_panel_roi_mask(median_frame, erosion_iterations):
 
 def find_prompts_by_peak_activity(activity_map, num_prompts, quantile_thresh):
     """Finds prompts by selecting the N blobs with the highest peak activity."""
+    
     print(f"\nStep 4: Finding the {num_prompts} most intense blobs (quantile: {quantile_thresh:.3f})...")
     if activity_map is None or not np.any(activity_map > 1e-9): return [], []
     active_pixels = activity_map[activity_map > 1e-9]
@@ -203,7 +204,8 @@ def visualize_prompts(activity_map, all_candidates, final_prompts, save_path, me
     im = ax.imshow(activity_map, cmap='hot', vmin=0)
     label = 'Activity (Theil-Sen Slope)' if method == 'theil_sen' else 'Activity (Kendall Tau Corr.)'
     fig.colorbar(im, ax=ax, label=label)
-    ax.set_title('Debug Map: Prompts from Most Intense Blobs')
+    #ax.set_title('Debug Map: Prompts from Most Intense Blobs')
+    ax.set_title('Step 3: Generating prompts for SAM model')
     if all_candidates: ax.scatter([c['centroid'][0] for c in all_candidates], [c['centroid'][1] for c in all_candidates], s=100, facecolors='none', edgecolors='cyan', lw=1.5, label='All Found Blobs')
     if final_prompts: ax.scatter(np.array([p['centroid'] for p in final_prompts])[:, 0], np.array([p['centroid'] for p in final_prompts])[:, 1], s=600, c='yellow', marker='*', edgecolor='black', label='Final Selected Prompts', zorder=5)
     ax.legend(); fig.savefig(save_path); plt.close(fig)
@@ -286,6 +288,8 @@ def main(args):
     else: # Default to 'otsu'
         roi_mask = create_panel_roi_mask(target_frame, args.roi_erosion)
 
+    plt.imsave(os.path.join(args.output_dir, "DEBUG_roi_mask.png"), roi_mask, cmap='gray')
+
     masked_activity_map = activity_map * roi_mask
     
     top_candidates, all_candidates = find_prompts_by_peak_activity(
@@ -307,20 +311,51 @@ def main(args):
 
     if not all_final_masks: print("SAM did not generate masks. Exiting.", file=sys.stderr); sys.exit(1)
 
+    # print("\nSaving final outputs...")
+    # final_combined_mask = np.zeros((H, W), dtype=bool)
+    # segmentation_image = frame_rgb.copy()
+    # colors = [[255, 255, 0], [0, 255, 255]]
+    # for i, mask in enumerate(all_final_masks):
+    #     color = colors[i % len(colors)]
+    #     color_overlay = np.zeros_like(segmentation_image); color_overlay[mask] = color
+    #     segmentation_image = cv2.addWeighted(segmentation_image, 1, color_overlay, 0.6, 0)
+    #     final_combined_mask = np.logical_or(final_combined_mask, mask)
+    # plot_save_path = os.path.join(args.output_dir, f"{base_filename}_sam_segmentation.png")
+    # cv2.imwrite(plot_save_path, segmentation_image)
+    # mask_save_path = os.path.join(args.output_dir, f"{base_filename}_sam_mask.npy")
+    # np.save(mask_save_path, final_combined_mask)
+    # print(f"  Saved outputs to {args.output_dir}")
+    # print("\n--- Modular debug script finished. ---")
+
     print("\nSaving final outputs...")
+
     final_combined_mask = np.zeros((H, W), dtype=bool)
     segmentation_image = frame_rgb.copy()
     colors = [[255, 255, 0], [0, 255, 255]]
+
     for i, mask in enumerate(all_final_masks):
         color = colors[i % len(colors)]
-        color_overlay = np.zeros_like(segmentation_image); color_overlay[mask] = color
+        color_overlay = np.zeros_like(segmentation_image)
+        color_overlay[mask] = color
         segmentation_image = cv2.addWeighted(segmentation_image, 1, color_overlay, 0.6, 0)
         final_combined_mask = np.logical_or(final_combined_mask, mask)
+
+    # Save segmentation with title using matplotlib
     plot_save_path = os.path.join(args.output_dir, f"{base_filename}_sam_segmentation.png")
-    cv2.imwrite(plot_save_path, segmentation_image)
+
+    plt.figure(figsize=(8, 6))
+    plt.imshow(cv2.cvtColor(segmentation_image, cv2.COLOR_BGR2RGB))
+    plt.title("Step 4: Hotspot mask for the leaking holes")
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig(plot_save_path, bbox_inches='tight', pad_inches=0.1)
+    plt.close()
+    print(f"  Saved segmentation plot with title to: {plot_save_path}")
+
+    # Save raw binary mask
     mask_save_path = os.path.join(args.output_dir, f"{base_filename}_sam_mask.npy")
     np.save(mask_save_path, final_combined_mask)
-    print(f"  Saved outputs to {args.output_dir}")
+
     print("\n--- Modular debug script finished. ---")
 
 
@@ -333,7 +368,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", required=True, type=str)
     
     param_group = parser.add_argument_group('Pipeline Control Parameters')
-    param_group.add_argument("--num_leaks", type=int, default=1)
+    param_group.add_argument("--num_leaks", type=int, default=2)
     param_group.add_argument("--env_para", type=int, default=1, choices=[1, -1, 0])
     param_group.add_argument("--activity_method", type=str, default="kendall_tau", choices=['theil_sen', 'kendall_tau'])
     param_group.add_argument("--temporal_smooth_window", type=int, default=3)
@@ -357,3 +392,46 @@ if __name__ == "__main__":
         print(f"Error: SAM checkpoint not found at '{args.checkpoint}'", file=sys.stderr); sys.exit(1)
         
     main(args)
+
+"""
+python src_feature_based/debug-files/debug_simple_SAM.py \
+  --input datasets/Fluke_BrickCladding_2holes_0616_2025_noshutter/T1.4V_2.2Pa_2025-6-16-16-33-25_20_34_14_.mat \
+  --checkpoint SAM/sam_checkpoints/sam_vit_b_01ec64.pth \
+  --model_type vit_b \
+  --output_dir presentation_assets/Fluke_BrickCladding_2holes_0616_2025_noshutter/T1.4V_2.2Pa_2025-6-16-16-33-25_20_34_14 \
+  --temporal_smooth_window 3 \
+  --roi_erosion 3 \
+  --activity_method kendall_tau \
+  --spatial_filter bilateral \
+  --roi_method border \
+  --num_leaks 2
+
+  
+python src_feature_based/debug-files/debug_simple_SAM.py \
+  --input datasets/Fluke_Gypsum_07252025_noshutter/T1.6V_2025-07-28-17-36-55_20_34_14_.mat \
+  --checkpoint SAM/sam_checkpoints/sam_vit_b_01ec64.pth \
+  --model_type vit_b \
+  --output_dir presentation_assets/Fluke_Gypsum_07252025_noshutter/T1.6V_2025-07-28-17-36-55_20_34_14_.mat \
+  --temporal_smooth_window 3 \
+  --roi_erosion 3 \
+  --activity_method kendall_tau \
+  --spatial_filter bilateral \
+  --roi_method border \
+  --num_leaks 1
+
+Hardyboard:
+python src_feature_based/debug-files/debug_simple_SAM.py \
+  --input /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_08132025_2holes_noshutter/T1.8V_2025-08-15-17-56-33_21_32_11_.mat \
+  --checkpoint SAM/sam_checkpoints/sam_vit_b_01ec64.pth \
+  --model_type vit_b \
+  --output_dir Output_SAM/failing_masks/Fluke_HardyBoard_08132025_2holes_noshutter/T1.8V_2025-08-15-17-56-33_21_32_11 \
+  --temporal_smooth_window 3 \
+  --activity_quantile 0.99 \
+  --activity_method kendall_tau \
+  --spatial_filter bilateral \
+  --roi_method border \
+  --roi_border_percent 0.12 \
+  --num_leaks 2
+  
+
+"""

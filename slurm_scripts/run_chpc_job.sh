@@ -53,15 +53,20 @@ echo "----------------"
 
 export CHPC_SCRATCH_DIR="/scratch/general/vast/u1527145"
 
-# --- Experiment 1: LSTM model on 1-ch Thermal (Hard Crop) ---
-# This is your previous best model, for baseline comparison.
+# Experiment 1: LSTM model on 1-ch Thermal (Hard Crop) ---
+
 # MODEL_TYPE="lstm"
 # DATASET_DIR="CNN_dataset/dataset_1ch_thermal_hard_crop"
 # IN_CHANNELS=1
 
-# --- Experiment 2: LSTM model on 2-ch Thermal + Mask (NEW EXPERIMENT) ---
+# Experiment 2: LSTM model on 2-ch Thermal + Mask
 MODEL_TYPE="lstm"
 DATASET_DIR="CNN_dataset/dataset_2ch_thermal_masked_f10s"
+IN_CHANNELS=2
+
+# Experiment 2.1: LSTM model on 2-ch Thermal + Mask (1-failing video removed from dataset)
+MODEL_TYPE="lstm"
+DATASET_DIR="CNN_dataset/dataset_2ch_thermal_masked"
 IN_CHANNELS=2
 
 

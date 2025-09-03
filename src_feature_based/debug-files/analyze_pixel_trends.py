@@ -192,4 +192,9 @@ Fluke_BrickCladding_2holes_0805_2025_noshutter
         datasets/Fluke_BrickCladding_2holes_0805_2025_noshutter/T1.6V_2025-08-05-20-22-42_20_26_6_.mat \
         debug_ouputs/Fluke_BrickCladding_2holes_0805_2025_noshutter/vid-3
 
+Fluke_HardyBoard_08132025_2holes_noshutter
+    vid-4
+    python -m src_feature_based.debug-files.analyze_pixel_trends \
+        /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_08132025_2holes_noshutter/T1.4V_2025-08-15-18-45-57_21_32_11_.mat \
+        debug_ouputs/Fluke_HardyBoard_08132025_2holes_noshutter/vid-4
 """

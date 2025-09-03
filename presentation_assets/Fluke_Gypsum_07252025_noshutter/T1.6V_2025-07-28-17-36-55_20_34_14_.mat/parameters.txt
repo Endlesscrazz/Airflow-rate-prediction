@@ -1,0 +1,14 @@
+--- Run Parameters ---
+activity_method: kendall_tau
+activity_quantile: 0.995
+checkpoint: SAM/sam_checkpoints/sam_vit_b_01ec64.pth
+env_para: 1
+input: datasets/Fluke_Gypsum_07252025_noshutter/T1.6V_2025-07-28-17-36-55_20_34_14_.mat
+model_type: vit_b
+num_leaks: 1
+output_dir: presentation_assets/Fluke_Gypsum_07252025_noshutter/T1.6V_2025-07-28-17-36-55_20_34_14_.mat
+roi_border_percent: 0.1
+roi_erosion: 3
+roi_method: border
+spatial_filter: bilateral
+temporal_smooth_window: 3

@@ -144,4 +144,4 @@ if __name__ == "__main__":
     
     visualize_dataset(args.dataset_dir, max_s, output_dir_name)
 
-# python -m scripts.vis_cnn_dataset --dataset_dir "CNN_dataset/dataset_2ch_thermal_masked_f10s"
+# python -m scripts.vis_cnn_dataset --dataset_dir "CNN_dataset/dataset_2ch_thermal_masked"

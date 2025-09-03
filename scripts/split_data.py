@@ -33,7 +33,7 @@ def main():
                         help="Path to the input metadata.csv or master_features.csv file to be split.")
     parser.add_argument("--holdout_size", type=float, default=0.2,
                         help="The approximate fraction of the data for the hold-out set.")
-    parser.add_argument("--random_state", type=int, default=cnn_cfg.RANDOM_STATE,
+    parser.add_argument("--random_state", type=int, default=42,
                         help="Seed for the random number generator for reproducibility.")
     args = parser.parse_args()
 
@@ -120,7 +120,7 @@ if __name__ == "__main__":
     main()
 
 """
-python -m scripts.split_data --input_csv CNN_dataset/dataset_2ch_thermal_masked_f10s/metadata.csv --random_state 43
+python -m scripts.split_data --input_csv CNN_dataset/dataset_2ch_thermal_masked/metadata.csv --random_state 41
 python -m scripts.split_data --input_csv output_feature_based/master_features.csv
 
 """

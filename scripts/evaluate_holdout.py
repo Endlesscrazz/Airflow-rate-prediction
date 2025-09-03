@@ -227,12 +227,12 @@ if __name__ == "__main__":
 """
 single-final-model:
 python -m scripts.evaluate_holdout --model_type lstm \
-    --dataset_dir CNN_dataset/dataset_2ch_thermal_masked_f10s \
+    --dataset_dir CNN_dataset/dataset_2ch_thermal_masked \
     --in_channels 2 \
     --optuna_tuned 
 
 python -m scripts.evaluate_holdout --model_type lstm \
-    --dataset_dir CNN_dataset/dataset_2ch_thermal_masked_f10s \
+    --dataset_dir CNN_dataset/dataset_2ch_thermal_masked \
     --in_channels 2 \
     --optuna_tuned \
     --ensemble

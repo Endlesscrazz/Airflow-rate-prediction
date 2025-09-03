@@ -7,7 +7,9 @@ import os
 # --- Path Configuration ---
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 # The top-level directory containing all raw data subfolders.
-RAW_DATA_ROOT = os.path.join(PROJECT_ROOT, "datasets")
+#RAW_DATA_ROOT_LOCAL = os.path.join(PROJECT_ROOT, "datasets")
+
+RAW_DATA_ROOT = '/Volumes/One_Touch/Airflow-rate-prediction/datasets'
 # Path to the parent directory containing corresponding .npy mask files
 RAW_MASK_PARENT_DIR = os.path.join(PROJECT_ROOT, "Output_SAM/datasets")
 # Path to the ground truth airflow data. We'll look for it in the root.
