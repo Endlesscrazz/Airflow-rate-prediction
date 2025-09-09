@@ -1,13 +1,8 @@
 # scripts/split_data.py
 """
 Splits a master metadata/feature CSV into a development (train) and hold-out (test) set.
-
-This single, robust script can handle multiple scenarios:
-- CNN pipeline metadata or feature-based pipeline master feature files.
-- Datasets with single or multiple material types.
-- Correctly groups samples from the same original video (e.g., multi-hole videos).
-
-It uses StratifiedGroupKFold to create the most balanced and leakage-free split possible.
+Uses StratifiedGroupKFold to create the most balanced and leakage-free split possible.
+Includes a detailed verification step to check the distribution of key variables.
 """
 import pandas as pd
 from sklearn.model_selection import StratifiedGroupKFold
@@ -16,13 +11,8 @@ import sys
 import numpy as np
 import argparse
 
-# --- Add project root to path for imports ---
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
-
-# Import configs from both pipelines to get RANDOM_STATE
-from src_cnn import config as cnn_cfg
-from src_feature_based import config as feat_cfg
 
 def main():
     parser = argparse.ArgumentParser(
@@ -37,15 +27,12 @@ def main():
                         help="Seed for the random number generator for reproducibility.")
     args = parser.parse_args()
 
-    # Determine output file paths based on the input path
     input_dir = os.path.dirname(args.input_csv)
-    TRAIN_CSV_PATH = os.path.join(input_dir, "train_metadata.csv")
-    HOLDOUT_CSV_PATH = os.path.join(input_dir, "holdout_metadata.csv")
-    
-    # If the input is master_features.csv, name the outputs accordingly
-    if "master_features.csv" in args.input_csv:
-        TRAIN_CSV_PATH = os.path.join(input_dir, "train_features.csv")
-        HOLDOUT_CSV_PATH = os.path.join(input_dir, "holdout_features.csv")
+    TRAIN_CSV_PATH = os.path.join(input_dir, "train_features.csv")
+    HOLDOUT_CSV_PATH = os.path.join(input_dir, "holdout_features.csv")
+    if "metadata.csv" in args.input_csv:
+        TRAIN_CSV_PATH = os.path.join(input_dir, "train_metadata.csv")
+        HOLDOUT_CSV_PATH = os.path.join(input_dir, "holdout_metadata.csv")
 
     print("--- Creating STRATIFIED & GROUPED Train/Hold-Out Split ---")
     
@@ -55,20 +42,16 @@ def main():
         
     df = pd.read_csv(args.input_csv)
 
-    # --- Intelligent Stratification Strategy ---
     print("\nDetermining stratification strategy...")
-    # Always stratify by airflow rate by creating discrete bins
     df['stratify_bins'] = pd.cut(df['airflow_rate'], bins=5, labels=False, duplicates='drop')
     
-    # Check if a 'material' column exists and has more than one unique value
     if 'material' in df.columns and df['material'].nunique() > 1:
         print("Multiple materials detected. Stratifying by 'airflow_rate' AND 'material'.")
         df['stratify_group'] = df['stratify_bins'].astype(str) + '_' + df['material']
     else:
-        print("Single material detected (or no material column). Stratifying by 'airflow_rate' only.")
+        print("Single material detected. Stratifying by 'airflow_rate' only.")
         df['stratify_group'] = df['stratify_bins'].astype(str)
         
-    # Create group labels from the original video ID to prevent data leakage
     df['original_video_id'] = df['video_id'].apply(lambda x: x.split('_hole_')[0])
     groups = df['original_video_id']
     y_stratify = df['stratify_group']
@@ -90,37 +73,57 @@ def main():
     dev_df = df.iloc[dev_idx]
     holdout_df = df.iloc[holdout_idx]
 
-    # Drop the temporary columns before saving
     dev_df = dev_df.drop(columns=['stratify_bins', 'stratify_group', 'original_video_id'])
     holdout_df = holdout_df.drop(columns=['stratify_bins', 'stratify_group', 'original_video_id'])
 
     dev_df.to_csv(TRAIN_CSV_PATH, index=False)
     holdout_df.to_csv(HOLDOUT_CSV_PATH, index=False)
 
-    print(f"\nOriginal dataset size: {len(df)} samples")
-    print(f"Development set size: {len(dev_df)} samples")
-    print(f"Hold-out set size: {len(holdout_df)} samples")
+    print(f"\nOriginal dataset size: {len(df)} samples ({df['original_video_id'].nunique()} unique videos)")
+    print(f"Development set size: {len(dev_df)} samples ({dev_df['video_id'].apply(lambda x: x.split('_hole_')[0]).nunique()} unique videos)")
+    print(f"Hold-out set size: {len(holdout_df)} samples ({holdout_df['video_id'].apply(lambda x: x.split('_hole_')[0]).nunique()} unique videos)")
     print(f"\nSaved development data to: {TRAIN_CSV_PATH}")
     print(f"Saved hold-out data to: {HOLDOUT_CSV_PATH}")
 
-    # --- Verification Step ---
+    # --- NEW & IMPROVED Verification Step ---
     print("\n--- Verifying Split Distribution ---")
-    dev_counts = dev_df['airflow_rate'].value_counts().sort_index()
-    holdout_counts = holdout_df['airflow_rate'].value_counts().sort_index()
+
+    # 1. Distribution by Material
+    if 'material' in df.columns and df['material'].nunique() > 1:
+        dev_material = dev_df['material'].value_counts(normalize=True)
+        holdout_material = holdout_df['material'].value_counts(normalize=True)
+        verification_material = pd.DataFrame({
+            'dev_set_%': dev_material,
+            'holdout_set_%': holdout_material
+        }).fillna(0)
+        print("\nDistribution of samples per Material (%):")
+        print((verification_material * 100).round(1))
+
+    # 2. Distribution by Airflow Bins (with FIXED bin edges)
+    # --- THIS IS THE KEY CHANGE ---
+    # First, create the bins based on the ENTIRE dataset to get fixed edges
+    _, bin_edges = pd.cut(df['airflow_rate'], bins=5, retbins=True)
     
-    verification_df = pd.DataFrame({
+    # Now, use these exact same bin edges to categorize the subsets
+    dev_bins = pd.cut(dev_df['airflow_rate'], bins=bin_edges, include_lowest=True)
+    holdout_bins = pd.cut(holdout_df['airflow_rate'], bins=bin_edges, include_lowest=True)
+    
+    dev_counts = dev_bins.value_counts().sort_index()
+    holdout_counts = holdout_bins.value_counts().sort_index()
+    
+    verification_bins = pd.DataFrame({
         'dev_set_count': dev_counts,
         'holdout_set_count': holdout_counts
     }).fillna(0).astype(int)
     
-    print("\nOverall distribution of samples per airflow rate:")
-    print(verification_df)
+    print("\nDistribution of samples per Airflow Rate Bin:")
+    print(verification_bins)
+
 
 if __name__ == "__main__":
     main()
-
 """
 python -m scripts.split_data --input_csv CNN_dataset/dataset_2ch_thermal_masked/metadata.csv --random_state 41
-python -m scripts.split_data --input_csv output_feature_based/master_features.csv
+python -m scripts.split_data --input_csv output_feature_based/master_features.csv --random_state 44
 
 """

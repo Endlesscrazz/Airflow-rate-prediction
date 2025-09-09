@@ -1,105 +1,104 @@
 # scripts/generate_features.py
 """
-Scans raw video and mask data, calculates a comprehensive set of handcrafted
-features for each identified leak, links them to ground truth values from a CSV,
-and saves the output to a single master feature file.
+Generates handcrafted features for each sample defined in the master ground truth CSV.
+This script implements the "one hole, one sample" philosophy by iterating through
+the combined ground truth file.
 """
 import os
 import sys
 import pandas as pd
 from tqdm import tqdm
-import fnmatch
 import numpy as np
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
 from src_feature_based import config as cfg
-from src_feature_based import data_utils, feature_engineering
+from src_feature_based import feature_engineering
+
+def find_mask_for_hole(video_id, hole_id, mask_parent_dir, dataset_subfolder):
+    """
+    Finds the specific mask file(s) for a given hole of a given video.
+    """
+    mask_search_dir = os.path.join(mask_parent_dir, dataset_subfolder, video_id)
+    if not os.path.isdir(mask_search_dir):
+        return []
+
+    all_masks = sorted([f for f in os.listdir(mask_search_dir) if f.endswith('.npy')])
+
+    if "2holes" in dataset_subfolder:
+        if ('centerhole' in hole_id or 'largehole' in hole_id) and len(all_masks) > 0:
+            return [os.path.join(mask_search_dir, all_masks[0])]
+        elif ('cornerhole' in hole_id or 'smallhole' in hole_id) and len(all_masks) > 1:
+            return [os.path.join(mask_search_dir, all_masks[1])]
+        else:
+            return []
+    else:
+        return [os.path.join(mask_search_dir, f) for f in all_masks]
 
 def main():
     print("--- Generating Master Handcrafted Feature CSV ---")
 
-    # 1. Load the ground truth airflow data from the CSV
-    airflow_map = data_utils.load_airflow_from_csv(cfg.GROUND_TRUTH_CSV_PATH)
-    print(f"Successfully loaded {len(airflow_map)} ground truth entries.")
+    if not os.path.exists(cfg.GROUND_TRUTH_CSV_PATH):
+        print(f"FATAL ERROR: Combined ground truth not found at '{cfg.GROUND_TRUTH_CSV_PATH}'")
+        print("Please run `create_combined_ground_truth.py` first.")
+        sys.exit(1)
+    
+    gt_df = pd.read_csv(cfg.GROUND_TRUTH_CSV_PATH)
+    print(f"Loaded {len(gt_df)} total samples to process from the ground truth file.")
 
-    # 2. Scan all raw video and mask files
-    print("\nScanning for all video and mask files...")
-    video_to_masks_map = {}
-    for d_key, d_conf in cfg.DATASET_CONFIGS.items():
-        dataset_path_load = os.path.join(cfg.RAW_DATA_ROOT, d_conf["dataset_subfolder"])
-        
-        if not os.path.isdir(dataset_path_load):
-            print(f"  -> WARNING: Data path not found for '{d_key}'. Skipping.")
-            continue
-        
-        for root_load, _, files_load in os.walk(dataset_path_load):
-            for mat_filename_load in fnmatch.filter(files_load, '*.mat'):
-                voltage = data_utils.parse_voltage_from_filename(mat_filename_load)
-                if voltage is None or voltage not in airflow_map:
-                    continue
-                
-                mat_filepath_load = os.path.join(root_load, mat_filename_load)
-                video_id = os.path.splitext(mat_filename_load)[0]
-                
-                if video_id not in video_to_masks_map:
-                    try:
-                        airflow_rate = airflow_map[voltage]
-                        delta_t_load = data_utils.parse_delta_T(mat_filename_load)
-                        if delta_t_load is None: continue
-
-                        video_to_masks_map[video_id] = {
-                            "video_id": video_id, "mat_filepath": mat_filepath_load, "mask_paths": [],
-                            "delta_T": float(delta_t_load), "airflow_rate": float(airflow_rate),
-                            "material": d_conf["material"], "source_dataset": d_conf["dataset_subfolder"]
-                        }
-                    except Exception:
-                        continue
-                
-                mask_search_dir = os.path.join(cfg.RAW_MASK_PARENT_DIR, d_conf["dataset_subfolder"], video_id)
-
-                if os.path.isdir(mask_search_dir):
-                    mask_files = fnmatch.filter(os.listdir(mask_search_dir), "*.npy")
-                    if mask_files and video_id in video_to_masks_map:
-                        for mask_filename in mask_files:
-                            full_mask_path = os.path.join(mask_search_dir, mask_filename)
-                            if full_mask_path not in video_to_masks_map[video_id]["mask_paths"]:
-                                video_to_masks_map[video_id]["mask_paths"].append(full_mask_path)
-
-    all_samples_info_list = [v for v in video_to_masks_map.values() if v.get("mask_paths")]
-    if not all_samples_info_list:
-        print("\nError: No samples found. Exiting.")
-        return
-
-    # 3. Extract features for each sample
-    print(f"\nFound {len(all_samples_info_list)} videos to process...")
     all_features_list = []
     
-    for sample_info in tqdm(all_samples_info_list, desc="Extracting features"):
-        try:
+    pbar = tqdm(gt_df.iterrows(), total=len(gt_df), desc="Extracting features")
+    for idx, sample_row in pbar:
+        video_id = sample_row['video_id']
+        hole_id = sample_row['hole_id']
+        material = sample_row['material']
+        
+        dataset_subfolder = None
+        # Find the correct subfolder from the config that matches the material
+        for conf_key, conf_details in cfg.DATASET_CONFIGS.items():
+            if conf_details['material'] == material:
+                # Check if the video file actually exists in this specific folder
+                mat_path_check = os.path.join(cfg.RAW_DATA_ROOT, conf_details['dataset_subfolder'], f"{video_id}.mat")
+                if os.path.exists(mat_path_check):
+                    dataset_subfolder = conf_details['dataset_subfolder']
+                    break # Found it, stop searching
+        
+        if not dataset_subfolder:
+            # New, more informative warning message
+            tqdm.write(f"  - WARNING: Could not find video file for ID '{video_id}' (Material: '{material}'). "
+                       f"Checked all configured '{material}' directories. Skipping sample.")
+            continue
+            
+        mat_filepath = os.path.join(cfg.RAW_DATA_ROOT, dataset_subfolder, f"{video_id}.mat")
 
+        mask_paths = find_mask_for_hole(video_id, hole_id, cfg.RAW_MASK_PARENT_DIR, dataset_subfolder)
+        
+        if not mask_paths:
+            tqdm.write(f"  - WARNING: No masks found for sample: {video_id} | {hole_id}. Skipping.")
+            continue
+            
+        try:
             extracted_features = feature_engineering.calculate_features_from_video(
-                sample_info["mat_filepath"],
-                sample_info["mask_paths"]
+                mat_filepath,
+                mask_paths
             )
             
-            record = {
-                "video_id": sample_info["video_id"],
-                "airflow_rate": sample_info["airflow_rate"],
-                "delta_T": sample_info["delta_T"],
-                "material": sample_info["material"],
-            }
+            record = sample_row.to_dict()
             record.update(extracted_features)
             all_features_list.append(record)
 
         except Exception as e:
-            print(f"Failed to process {sample_info['video_id']}: {e}")
+            print(f"  - ERROR: Failed to process {sample_row['video_id']}: {e}")
             continue
 
-    # 4. Create and save the DataFrame
+    if not all_features_list:
+        print("\n No features were generated. Check paths and file names.")
+        return
+
     df_master = pd.DataFrame(all_features_list)
-    # Ensure all possible feature columns exist, filling missing ones with NaN
+    
     for feature in cfg.ALL_POSSIBLE_FEATURES:
         if feature not in df_master.columns:
             df_master[feature] = np.nan

@@ -2,7 +2,7 @@
 """
 Performs a full cross-validation workflow for feature-based models.
 1. Loads pre-computed features and transforms them.
-2. Applies optional data augmentation and target scaling.
+2. Applies optional data augmentation and target transformation.
 3. Runs GridSearchCV with GroupKFold for multiple model types.
 4. Saves the best overall model for evaluation.
 """
@@ -12,7 +12,6 @@ import pandas as pd
 import numpy as np
 import joblib
 from sklearn.model_selection import GridSearchCV, GroupKFold
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.base import clone
 import warnings
 from sklearn.exceptions import ConvergenceWarning
@@ -85,31 +84,47 @@ def main():
     X_transformed = pd.concat([X_transformed, X_raw[other_features]], axis=1)
     X_transformed = pd.concat([X_transformed, pd.get_dummies(X_raw['material'], prefix='material', dtype=int)], axis=1)
     
-    print(f"Using {len(cfg.SELECTED_FEATURES)} selected features for training.")
-    X_dev = X_transformed[cfg.SELECTED_FEATURES]
+    # Reindex to ensure consistent column order, adding missing columns if necessary
+    print("\nCreating interaction features...")
+    features_to_interact = [
+        'temperature_kurtosis',
+        'temp_std_avg_initial',
+        'mean_area_significant_change',
+        'hotspot_area_log',
+        'hotspot_avg_temp_change_rate_initial_norm',
+    ]
+    material_cols = [col for col in X_transformed.columns if col.startswith('material_')]
+    
+    interaction_count = 0
+    for feature in features_to_interact:
+        if feature in X_transformed.columns:
+            for material_col in material_cols:
+                interaction_col_name = f"{feature}_x_{material_col.split('_')[-1]}"
+                # Add the new interaction feature to the main transformed dataframe
+                X_transformed[interaction_col_name] = X_transformed[feature] * X_transformed[material_col]
+                interaction_count += 1
 
+    if interaction_count > 0:
+        print(f"Added {interaction_count} new interaction features.")
+    
+    # The SELECTED_FEATURES list in config.py should now include the interaction features you want to use
+    X_dev = X_transformed.reindex(columns=cfg.SELECTED_FEATURES, fill_value=0)
+    print(f"\nUsing {len(X_dev.columns)} selected features for training.")
     log_experiment_configs(selected_features=X_dev.columns.tolist())
 
     # 3. Augment Data (Optional)
-    # Augment the entire development set before CV and scaling
     X_dev_final, y_dev_final, groups_dev_final = augment_features(
         X_dev, y_dev_original, groups_dev,
-        num_copies=4,
+        num_copies=4,       # to augment data
         noise_level=0.02
     )
     print(f"\nAugmented training set from {len(X_dev)} to {len(X_dev_final)} samples.")
     
-    # 4. Scale Target (Optional)
-    y_scaler = None
-
-    y_dev_log = np.log1p(y_dev_final)
-    print(f"\nApplied log1p transformation to the target variable.")
-
+    # 4. Transform Target (Optional)
+    y_to_train = y_dev_final.copy() # Default to original values
     if cfg.ENABLE_TARGET_SCALING:
-        print("\nTarget scaling enabled. Fitting MinMaxScaler...")
-        y_scaler = MinMaxScaler()
-        y_dev_scaled = y_scaler.fit_transform(y_dev_final.values.reshape(-1, 1)).flatten()
-        y_dev_final = pd.Series(y_dev_scaled, index=y_dev_final.index, name=y_dev_final.name)
+        print(f"\nTarget transformation enabled. Applying log1p transformation.")
+        y_to_train = np.log1p(y_to_train)
     
     # 5. Run Hyperparameter Tuning via Cross-Validation
     scoring_metrics = {
@@ -121,9 +136,7 @@ def main():
     cv_splitter = GroupKFold(n_splits=cfg.CV_FOLDS)
     models, param_grids = modeling.get_models_and_grids()
     best_estimators = {}
-    
-    # Use a DataFrame to store all results
-    all_cv_results = pd.DataFrame(columns=['R2', 'MAE', 'RMSE'])
+    all_cv_results = pd.DataFrame(columns=['R2', 'MAE (log)', 'RMSE (log)'])
 
     for model_name, model in models.items():
         print(f"\n--- Tuning {model_name} ---")
@@ -142,11 +155,8 @@ def main():
             return_train_score=True
         )
 
-        # --- KEY CHANGE: Fit on the log-transformed target ---
-        grid_search.fit(X_dev_final, y_dev_log, groups=groups_dev_final)
+        grid_search.fit(X_dev_final, y_to_train, groups=groups_dev_final)
         
-        # --- MODIFICATION: Report scores on the TRANSFORMED scale ---
-        # Note: MAE and RMSE are now in log-space and not directly interpretable in L/min
         best_index = grid_search.best_index_
         results = grid_search.cv_results_
         
@@ -154,26 +164,24 @@ def main():
         best_mae_log = -results['mean_test_neg_mean_absolute_error'][best_index]
         best_rmse_log = -results['mean_test_neg_root_mean_squared_error'][best_index]
 
-        print(f"Best CV Scores for {model_name} (on log-transformed target):")
+        print(f"Best CV Scores for {model_name} (on transformed target):")
         print(f"  - R²:   {best_r2:.4f}")
-        print(f"  - MAE (log-space):  {best_mae_log:.4f}")
-        print(f"  - RMSE (log-space): {best_rmse_log:.4f}")
+        print(f"  - MAE:  {best_mae_log:.4f} (log-space)")
+        print(f"  - RMSE: {best_rmse_log:.4f} (log-space)")
         print(f"Best parameters: {grid_search.best_params_}")
         
         best_estimators[model_name] = grid_search.best_estimator_
         all_cv_results.loc[model_name] = [best_r2, best_mae_log, best_rmse_log]
 
-    # --- MODIFICATION: More informative model finalization ---
-    print("\n--- Cross-Validation Summary ---")
+    print("\n--- Cross-Validation Summary (Scores on Transformed Target) ---")
     print(all_cv_results.sort_values(by='R2', ascending=False))
     
-    # The best model is still chosen based on the highest R²
     best_model_name = all_cv_results['R2'].idxmax()
     final_model_pipeline = best_estimators[best_model_name]
     
     print(f"\n--- Best model from CV is: {best_model_name} (Avg R² = {all_cv_results.loc[best_model_name, 'R2']:.4f}) ---")
 
-    # 6. Finalize and Save Best Model
+    # 6. Save Best Model
     model_save_dir = os.path.join(cfg.OUTPUT_DIR, "trained_cv_model")
     os.makedirs(model_save_dir, exist_ok=True)
     
@@ -182,19 +190,16 @@ def main():
     joblib.dump(final_model_pipeline, model_save_path)
     print(f"Saved final trained model to: {model_save_path}")
     
-    if y_scaler:
-        scaler_filename = f"final_target_scaler_{best_model_name}.joblib"
-        scaler_save_path = os.path.join(model_save_dir, scaler_filename)
-        joblib.dump(y_scaler, scaler_save_path)
-        print(f"Saved final target scaler to: {scaler_save_path}")
+    # NOTE: We no longer save a target scaler, as np.expm1 is the inverse.
 
-    # --- (Plotting section remains the same) ---
+    # 7. Generate Diagnostic Plots
     print("\n--- Generating Diagnostic Plots for the Best Model ---")
     plots_dir = os.path.join(cfg.OUTPUT_DIR, "plots")
     os.makedirs(plots_dir, exist_ok=True)
 
     lc_title = f"Learning Curve for {best_model_name}"
     lc_path = os.path.join(plots_dir, f"learning_curve_{best_model_name}.png")
+    # Learning curve is plotted on the original, un-augmented, un-transformed data for consistency
     plotting.plot_learning_curves(
         clone(final_model_pipeline), lc_title, X_dev, y_dev_original, groups=groups_dev, save_path=lc_path
     )
