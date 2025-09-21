@@ -32,6 +32,7 @@ masks_raw/
 CNN_dataset/
 
 output_SAM/
+stabilization_poc_output/
 
 # --- Large Model Checkpoints ---
 SAM/

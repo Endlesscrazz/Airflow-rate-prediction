@@ -222,22 +222,31 @@ def main():
     os.makedirs(MODEL_SAVE_DIR, exist_ok=True)
 
     # 7. Training Loop
+    patience = 20  # Num of epochs to wait for improvement before stopping
+    epochs_no_improve = 0
+    best_val_rmse = float('inf') 
+    
     for epoch in tqdm(range(cfg.NUM_EPOCHS_CV), desc=f"Training Fold {current_fold+1}", disable=(not is_interactive)):
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, cfg.DEVICE)
         
-        # --- MODIFIED: Unpack new metrics ---
         val_loss, val_rmse, val_mae, val_r2 = evaluate(model, val_loader, criterion, cfg.DEVICE)
         scheduler.step(val_loss)
 
         if (epoch + 1) % 5 == 0 or epoch == 0:
              current_lr = optimizer.param_groups[-1]['lr']
-             # --- MODIFIED: Update logging ---
              tqdm.write(f"Epoch {epoch+1:03d}/{cfg.NUM_EPOCHS_CV} | Train Loss: {train_loss:.4f} | Val RMSE: {val_rmse:.4f} | Val MAE: {val_mae:.4f} | Val R²: {val_r2:.4f} | LR: {current_lr:.1e}")
 
-        # --- MODIFIED: Save model based on best validation RMSE ---
+        # --- Early stopping logic ---
         if val_rmse < best_val_rmse:
             best_val_rmse = val_rmse
             torch.save(model.state_dict(), model_save_path)
+            epochs_no_improve = 0  # Reset counter
+        else:
+            epochs_no_improve += 1
+
+        if epochs_no_improve >= patience:
+            print(f"\n--- Early stopping triggered at epoch {epoch + 1} after {patience} epochs with no improvement. ---")
+            break  # Exit the training loop
 
     # 8. Report Final Results for this Fold
     print(f"\n----- Finished Fold {current_fold + 1} -----")

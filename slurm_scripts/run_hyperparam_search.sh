@@ -31,7 +31,7 @@ conda activate "${CONDA_ENV_NAME}"
 # This makes it easy to switch between experiments (e.g., 1ch vs 2ch).
 
 # --- Best performing dataset based on your previous work ---
-DATASET_NAME="dataset_2ch_thermal_masked_f10s"
+DATASET_NAME="dataset_2ch_thermal_masked_gyp_hdb"
 INPUT_CHANNELS=2
 
 # You could easily switch to another dataset by changing the two lines above, e.g.:

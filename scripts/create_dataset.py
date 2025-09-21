@@ -1,28 +1,28 @@
 # scripts/create_dataset.py
 """
-Prepares a dataset for CNN-based models.
-This single, configurable script can generate one of three dataset types.
+Prepares a dataset for CNN-based models by using a master ground truth CSV.
+This single, configurable script can generate one of four dataset types.
 All configurations are imported from src_cnn.config.
 
 Run using:
-python -m scripts.create_dataset --type [thermal|flow|hybrid]
+python -m scripts.create_dataset --type [thermal|thermal_masked|flow|hybrid]
 """
-from src_cnn import feature_engineering
-from src_cnn import data_utils
-from src_cnn import config as cfg
 import os
 import sys
 import pandas as pd
 import numpy as np
 import scipy.io
 import cv2
-import fnmatch
 from tqdm import tqdm
 import datetime
 import argparse
+import glob
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
+
+from src_cnn import feature_engineering
+from src_cnn import config as cfg
 
 
 def save_dataset_parameters(output_dir, dataset_type_str, num_samples, final_df, context_cols, dynamic_cols, seq_len, num_ch):
@@ -55,92 +55,93 @@ def save_dataset_parameters(output_dir, dataset_type_str, num_samples, final_df,
     print(f"\nSuccessfully saved dataset parameters to: {save_path}")
 
 
+def find_data_files(video_id):
+    """Finds the .mat video file and all associated .npy mask files for a given video_id."""
+    mat_filepath = None
+    mask_dir = None
+    
+    # Search for the .mat file and mask directory across all configured raw data locations
+    for d_conf in cfg.DATASET_CONFIGS.values():
+        # Check for video file
+        potential_mat_path = os.path.join(cfg.RAW_DATASET_PARENT_DIR, d_conf["dataset_subfolder"], f"{video_id}.mat")
+        if os.path.exists(potential_mat_path):
+            mat_filepath = potential_mat_path
+        
+        # Check for mask directory
+        potential_mask_dir = os.path.join(cfg.RAW_MASK_PARENT_DIR, d_conf["dataset_subfolder"], video_id)
+        if os.path.isdir(potential_mask_dir):
+            mask_dir = potential_mask_dir
+        
+        # If we found both, we can stop searching
+        if mat_filepath and mask_dir:
+            break
+
+    if not mat_filepath or not mask_dir:
+        return None, []
+
+    # Find and sort all mask files in the found directory
+    mask_paths = sorted(glob.glob(os.path.join(mask_dir, f"{video_id}_mask_*.npy")))
+    return mat_filepath, mask_paths
+
+
 def create_dataset(dataset_type):
     """Main function to generate the specified dataset."""
     FOCUS_DURATION_FRAMES = int(cfg.FOCUS_DURATION_SECONDS * cfg.TRUE_FPS)
 
-    if dataset_type == 'thermal':
-        output_dir = os.path.join(cfg.PROCESSED_DATASET_DIR, "dataset_1ch_thermal_hard_crop")
-        DATASET_TYPE_STR = "1-Channel Thermal (Hard Crop)"
-    elif dataset_type == 'thermal_masked':
-        output_dir = os.path.join(cfg.PROCESSED_DATASET_DIR, "dataset_2ch_thermal_masked")
-        DATASET_TYPE_STR = "2-Channel Thermal + Mask"
-    elif dataset_type == 'flow':
-        output_dir = os.path.join(cfg.PROCESSED_DATASET_DIR, "dataset_2ch_flow_hard_crop")
-        DATASET_TYPE_STR = "2-Channel Optical Flow"
-    elif dataset_type == 'hybrid':
-        output_dir = os.path.join(cfg.PROCESSED_DATASET_DIR, "dataset_3ch_hybrid_hard_crop")
-        DATASET_TYPE_STR = "3-Channel Hybrid"
-    else:
-        raise ValueError(f"Invalid dataset type: {dataset_type}")
-
+    type_to_folder = {
+        'thermal': "dataset_1ch_thermal_hard_crop",
+        'thermal_masked': "dataset_2ch_thermal_masked",
+        'flow': "dataset_2ch_flow_hard_crop",
+        'hybrid': "dataset_3ch_hybrid_hard_crop"
+    }
+    type_to_str = {
+        'thermal': "1-Channel Thermal (Hard Crop)",
+        'thermal_masked': "2-Channel Thermal + Mask",
+        'flow': "2-Channel Optical Flow",
+        'hybrid': "3-Channel Hybrid"
+    }
+    output_dir = os.path.join(cfg.PROCESSED_DATASET_DIR, type_to_folder.get(dataset_type))
+    DATASET_TYPE_STR = type_to_str.get(dataset_type)
     METADATA_SAVE_PATH = os.path.join(output_dir, "metadata.csv")
-    
+    os.makedirs(output_dir, exist_ok=True)
+
     print(f"--- Starting Dataset Creation: {DATASET_TYPE_STR} ---")
     
-    # 1. Load Ground Truth Airflow Data
     try:
-        airflow_map = data_utils.load_airflow_from_csv(cfg.GROUND_TRUTH_CSV_PATH)
-        print(f"Loaded {len(airflow_map)} ground truth entries from {cfg.GROUND_TRUTH_CSV_PATH}")
+        ground_truth_df = pd.read_csv(cfg.GROUND_TRUTH_CSV_PATH)
+        print(f"Loaded {len(ground_truth_df)} total samples from {cfg.GROUND_TRUTH_CSV_PATH}")
     except Exception as e:
-        print(f"Could not load or parse ground truth CSV. Aborting. Error: {e}")
+        print(f"FATAL: Could not load master ground truth CSV '{cfg.GROUND_TRUTH_CSV_PATH}'. Error: {e}")
         return
 
-    # 2. Scan for video and mask files
-    print("\nScanning for all video and mask files...")
-    video_to_masks_map = {}
-    for d_key, d_conf in cfg.DATASET_CONFIGS.items():
-        dataset_path_load = os.path.join(cfg.RAW_DATASET_PARENT_DIR, d_conf["dataset_subfolder"])
-        if not os.path.isdir(dataset_path_load):
-            print(f"  -> WARNING: Data path not found for '{d_key}'. Skipping.")
-            continue
-        
-        for root_load, _, files_load in os.walk(dataset_path_load):
-            for mat_filename_load in fnmatch.filter(files_load, '*.mat'):
-                # Link video to ground truth via voltage parsed from filename
-                voltage = data_utils.parse_voltage_from_filename(mat_filename_load)
-                if voltage is None or voltage not in airflow_map:
-                    continue
-                
-                mat_filepath_load = os.path.join(root_load, mat_filename_load)
-                video_id = os.path.splitext(mat_filename_load)[0]
-                
-                if video_id not in video_to_masks_map:
-                    try:
-                        airflow_rate = airflow_map[voltage]
-                        delta_t_load = data_utils.parse_delta_T(mat_filename_load)
-                        if delta_t_load is None: continue
-
-                        video_to_masks_map[video_id] = {
-                            "video_id": video_id, "mat_filepath": mat_filepath_load, "mask_paths": [],
-                            "delta_T": float(delta_t_load), "airflow_rate": float(airflow_rate),
-                            "material": d_conf["material"], "source_dataset": d_conf["dataset_subfolder"]
-                        }
-                    except Exception as e:
-                        print(f"Error processing metadata for {mat_filename_load}: {e}")
-                        continue
-                
-                # New mask finding logic
-                mask_search_dir = os.path.join(cfg.RAW_MASK_PARENT_DIR, d_conf["dataset_subfolder"], video_id)
-                if os.path.isdir(mask_search_dir):
-                    mask_files = fnmatch.filter(os.listdir(mask_search_dir), "*.npy")
-                    if mask_files:
-                        video_to_masks_map[video_id]["mask_paths"].extend([os.path.join(mask_search_dir, mf) for mf in mask_files])
-    
-    all_samples_info_list = [v for v in video_to_masks_map.values() if v.get("mask_paths")]
-    if not all_samples_info_list:
-        print("\nError: No samples found. Exiting.")
-        return
-
-    print("\nStep 2: Processing videos to extract ROI sequences...")
+    print("\nProcessing samples based on ground truth CSV...")
     all_metadata, failed_samples = [], []
     final_sequence_length, final_num_channels = 0, 0
 
-    for sample_info in tqdm(all_samples_info_list, desc="Extracting Sequences"):
+    for index, sample_row in tqdm(ground_truth_df.iterrows(), total=len(ground_truth_df), desc="Processing Samples"):
         try:
-            mat_filepath = sample_info['mat_filepath']
+            video_id = sample_row['video_id']
+            hole_id = sample_row['hole_id']
+            
+            mat_filepath, mask_paths = find_data_files(video_id)
+
+            if not mat_filepath:
+                raise FileNotFoundError(f"Could not find .mat file for video_id '{video_id}'")
+            if not mask_paths:
+                raise FileNotFoundError(f"Could not find any masks for video_id '{video_id}'")
+
+            hole_index_str = str(hole_id).split('_')[0]
+            if not hole_index_str.isdigit():
+                raise ValueError(f"Could not parse numeric index from hole_id '{hole_id}'")
+            hole_index = int(hole_index_str) - 1
+
+            if not (0 <= hole_index < len(mask_paths)):
+                raise IndexError(f"Mask index {hole_index} is out of bounds for video '{video_id}' (found {len(mask_paths)} masks)")
+            
+            individual_mask_path = mask_paths[hole_index]
+            individual_mask = np.load(individual_mask_path).astype(bool)
+
             mat_data = scipy.io.loadmat(mat_filepath)
-            # Use a default key 'TempFrames' if MAT_FRAMES_KEY is not in the old config
             frames = mat_data.get('TempFrames').astype(np.float64)
             H, W, T = frames.shape
             end_frame = min(T, FOCUS_DURATION_FRAMES)
@@ -148,170 +149,120 @@ def create_dataset(dataset_type):
             if end_frame < cfg.NUM_FRAMES_PER_SAMPLE:
                 raise ValueError(f"Video too short ({T} frames)")
 
-            frame_indices = np.linspace(
-                0, end_frame - 1, cfg.NUM_FRAMES_PER_SAMPLE, dtype=int)
+            frame_indices = np.linspace(0, end_frame - 1, cfg.NUM_FRAMES_PER_SAMPLE, dtype=int)
             selected_frames = frames[:, :, frame_indices]
-            is_two_hole_video = sample_info['source_dataset'] == 'brick_cladding_two_holes'
-            masks_to_process = []
 
-            if is_two_hole_video:
-                for mask_path in sample_info['mask_paths']:
-                    if mask_path.endswith('.npy'):
-                        masks_to_process.append(
-                            np.load(mask_path).astype(bool))
+            if not np.any(individual_mask):
+                raise ValueError("Mask is empty")
+
+            processed_frames_list = []
+            sample_id = f"{video_id}_{hole_id}"
+            
+            if dataset_type == 'thermal_masked':
+                for frame_idx in range(cfg.NUM_FRAMES_PER_SAMPLE):
+                    full_frame = selected_frames[:, :, frame_idx]
+                    frame_resized = cv2.resize(full_frame, cfg.IMAGE_TARGET_SIZE, interpolation=cv2.INTER_AREA)
+                    mask_resized = cv2.resize(individual_mask.astype(np.float32), cfg.IMAGE_TARGET_SIZE, interpolation=cv2.INTER_NEAREST)
+                    stacked_frame = np.stack([frame_resized, mask_resized], axis=-1)
+                    processed_frames_list.append(stacked_frame)
             else:
-                combined_mask = np.zeros((H, W), dtype=bool)
-                for mask_path in sample_info['mask_paths']:
-                    combined_mask = np.logical_or(
-                        combined_mask, np.load(mask_path))
-                if np.sum(combined_mask) > 0:
-                    masks_to_process.append(combined_mask)
-            if not masks_to_process:
-                raise ValueError("No valid masks found")
+                x, y, w, h = cv2.boundingRect(individual_mask.astype(np.uint8))
+                pad_w = int(w * cfg.ROI_PADDING_PERCENT / 2); pad_h = int(h * cfg.ROI_PADDING_PERCENT / 2)
+                x1, y1 = max(0, x - pad_w), max(0, y - pad_h)
+                x2, y2 = min(W, x + w + pad_w), min(H, y + h + pad_h)
+                cropped_rois = selected_frames[y1:y2, x1:x2, :]
+                if cropped_rois.size == 0: continue
+                if dataset_type == 'thermal':
+                    for i in range(cfg.NUM_FRAMES_PER_SAMPLE):
+                        processed_frames_list.append(cv2.resize(cropped_rois[:, :, i], cfg.IMAGE_TARGET_SIZE, cv2.INTER_AREA))
+                elif dataset_type in ['flow', 'hybrid']:
+                    for i in range(cfg.NUM_FRAMES_PER_SAMPLE - 1):
+                        prev = cv2.normalize(cv2.resize(cropped_rois[:, :, i], cfg.IMAGE_TARGET_SIZE), None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+                        next = cv2.normalize(cv2.resize(cropped_rois[:, :, i+1], cfg.IMAGE_TARGET_SIZE), None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+                        flow = cv2.calcOpticalFlowFarneback(prev, next, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+                        if dataset_type == 'flow': processed_frames_list.append(flow)
+                        else:
+                            thermal_ch = (cropped_rois[:, :, i] - cropped_rois[:, :, i].min()) / (cropped_rois[:, :, i].max() - cropped_rois[:, :, i].min() + 1e-6)
+                            processed_frames_list.append(np.dstack([cv2.resize(thermal_ch, cfg.IMAGE_TARGET_SIZE), flow]))
+            
+            if not processed_frames_list: continue
 
-            for i, individual_mask in enumerate(masks_to_process):
-                if not np.any(individual_mask): continue
+            final_sequence_array = np.stack(processed_frames_list, axis=0)
+            final_sequence_length = final_sequence_array.shape[0]
+            final_num_channels = final_sequence_array.shape[-1] if final_sequence_array.ndim == 4 else 1
 
-                original_video_id = sample_info['video_id']
-                new_video_id = f"{original_video_id}_hole_{i}" if is_two_hole_video else original_video_id
-                
-                processed_frames_list = []
-                
-                
-                if dataset_type == 'thermal_masked':
-                    # NEW LOGIC: Use full frame and add mask as a channel
-                    for frame_idx in range(cfg.NUM_FRAMES_PER_SAMPLE):
-                        full_frame = selected_frames[:, :, frame_idx]
-                        frame_resized = cv2.resize(full_frame, cfg.IMAGE_TARGET_SIZE, interpolation=cv2.INTER_AREA)
-                        mask_resized = cv2.resize(individual_mask.astype(np.float32), cfg.IMAGE_TARGET_SIZE, interpolation=cv2.INTER_NEAREST)
-                        stacked_frame = np.stack([frame_resized, mask_resized], axis=-1)
-                        processed_frames_list.append(stacked_frame)
-                else:
-                    # OLD LOGIC: Hard crop to the bounding box
-                    x, y, w, h = cv2.boundingRect(individual_mask.astype(np.uint8))
-                    pad_w = int(w * cfg.ROI_PADDING_PERCENT / 2)
-                    pad_h = int(h * cfg.ROI_PADDING_PERCENT / 2)
-                    x1, y1 = max(0, x - pad_w), max(0, y - pad_h)
-                    x2, y2 = min(W, x + w + pad_w), min(H, y + h + pad_h)
-                    cropped_rois = selected_frames[y1:y2, x1:x2, :]
+            image_filename = f"{sample_id}.npy"
+            image_save_path_full = os.path.join(output_dir, image_filename)
+            np.save(image_save_path_full, final_sequence_array)
 
-                    if cropped_rois.size == 0:
-                        print(f"Warning: Cropped ROI is empty for {new_video_id}. Skipping.")
-                        continue
+            handcrafted_features = feature_engineering.calculate_hotspot_features(frames=frames, hotspot_mask=individual_mask)
 
-                    if dataset_type == 'thermal':
-                        for frame_idx in range(cfg.NUM_FRAMES_PER_SAMPLE):
-                            resized = cv2.resize(cropped_rois[:, :, frame_idx], cfg.IMAGE_TARGET_SIZE, interpolation=cv2.INTER_AREA)
-                            processed_frames_list.append(resized)
-
-                    elif dataset_type in ['flow', 'hybrid']:
-                        for frame_idx in range(cfg.NUM_FRAMES_PER_SAMPLE - 1):
-                            prev_roi = cv2.resize(cropped_rois[:, :, frame_idx], cfg.IMAGE_TARGET_SIZE, cv2.INTER_AREA)
-                            next_roi = cv2.resize(cropped_rois[:, :, frame_idx + 1], cfg.IMAGE_TARGET_SIZE, cv2.INTER_AREA)
-                            
-                            prev_norm = cv2.normalize(prev_roi, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-                            next_norm = cv2.normalize(next_roi, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-                            
-                            flow = cv2.calcOpticalFlowFarneback(prev_norm, next_norm, None, 0.5, 3, 15, 3, 5, 1.2, 0)
-
-                            if dataset_type == 'flow':
-                                processed_frames_list.append(flow)
-                            elif dataset_type == 'hybrid':
-                                min_val, max_val = prev_roi.min(), prev_roi.max()
-                                thermal_ch = (prev_roi - min_val) / (max_val - min_val) if max_val > min_val else np.zeros_like(prev_roi)
-                                hybrid_frame = np.dstack([thermal_ch, flow])
-                                processed_frames_list.append(hybrid_frame)
-
-                if not processed_frames_list:
-                    raise ValueError("No frames were processed.")
-
-                final_sequence_array = np.stack(processed_frames_list, axis=0)
-                final_sequence_length = final_sequence_array.shape[0]
-                final_num_channels = final_sequence_array.shape[-1] if final_sequence_array.ndim == 4 else 1
-
-                handcrafted_features = feature_engineering.calculate_hotspot_features(
-                    frames=frames,
-                    hotspot_mask=individual_mask,
-                    envir_para=1
-                )
-
-                mat_dir = os.path.dirname(mat_filepath)
-                relative_structure_path = os.path.relpath(
-                    mat_dir, cfg.RAW_DATASET_PARENT_DIR)
-                output_dir_for_sample = os.path.join(
-                    output_dir, relative_structure_path)
-                os.makedirs(output_dir_for_sample, exist_ok=True)
-
-                image_filename = f"{new_video_id}.npy"
-                image_save_path_full = os.path.join(
-                    output_dir_for_sample, image_filename)
-                np.save(image_save_path_full, final_sequence_array)
-
-                image_path_for_metadata = os.path.join(
-                    relative_structure_path, image_filename).replace(os.sep, '/')
-                current_metadata = {
-                    'video_id': new_video_id, 'image_path': image_path_for_metadata,
-                    'airflow_rate': sample_info['airflow_rate'], 'delta_T': sample_info['delta_T'],
-                    'material': sample_info['material']
-                }
-                if handcrafted_features:
-                    current_metadata.update(handcrafted_features)
-                all_metadata.append(current_metadata)
+            current_metadata = {
+                'video_id': video_id,
+                'sample_id': sample_id,
+                'image_path': image_filename,
+                'airflow_rate': sample_row['airflow_rate'],
+                'delta_T': sample_row['delta_T'],
+                'material': sample_row['material']
+            }
+            if handcrafted_features: current_metadata.update(handcrafted_features)
+            all_metadata.append(current_metadata)
 
         except Exception as e:
-            failed_samples.append({'video_id': sample_info.get(
-                'video_id', 'Unknown'), 'error': str(e)})
+            # Add to failed list, but also re-raise the error for the first failure to stop execution for debugging
+            failed_samples.append({'video_id': sample_row.get('video_id', 'Unknown'), 'hole_id': sample_row.get('hole_id', 'Unknown'), 'error': str(e)})
+            print(f"\n\n--- SCRIPT STOPPED DUE TO ERROR ---")
+            print(f"Failed on sample index {index}, video_id: '{sample_row.get('video_id')}', hole_id: '{sample_row.get('hole_id')}'")
+            print(f"Error Type: {type(e).__name__}")
+            print(f"Error Details: {e}")
+            print(f"Please check your file paths, config.py, and ground truth CSV.")
+            print(f"-------------------------------------\n")
+            raise e # Stop the script on the first error
 
-    print("\nStep 3: Generating final metadata.csv file...")
+    # --- Feature Engineering and Saving ---
     if not all_metadata:
-        print("Error: No metadata was generated.")
+        print("Error: No metadata was generated. All samples failed.")
+        if failed_samples:
+            print(f"\nSummary of the first 5 failures:")
+            for i, failed in enumerate(failed_samples[:5]):
+                 print(f"  - Sample {i+1}: ID='{failed['video_id']}', Hole='{failed['hole_id']}', Reason: {failed['error']}")
         return
 
     df_metadata_raw = pd.DataFrame(all_metadata)
-    final_df = df_metadata_raw[[
-        'video_id', 'image_path', 'airflow_rate', 'material']].copy()
+    final_df = df_metadata_raw[['sample_id', 'video_id', 'image_path', 'airflow_rate', 'material']].copy()
     context_feature_cols, dynamic_feature_cols = [], []
-    final_df['delta_T_log'] = np.log1p(
-        df_metadata_raw['delta_T'].astype(float).clip(lower=0))
+    final_df['delta_T_log'] = np.log1p(df_metadata_raw['delta_T'].astype(float).clip(lower=0))
     context_feature_cols.append('delta_T_log')
 
+    # (The rest of the feature engineering logic is the same)
     if 'hotspot_area' in cfg.HANDCRAFTED_FEATURES_TO_EXTRACT and 'hotspot_area' in df_metadata_raw.columns:
         if cfg.LOG_TRANSFORM_AREA:
-            final_df['hotspot_area_log'] = np.log1p(
-                df_metadata_raw['hotspot_area'].astype(float).clip(lower=0))
+            final_df['hotspot_area_log'] = np.log1p(df_metadata_raw['hotspot_area'].astype(float).clip(lower=0))
             dynamic_feature_cols.append('hotspot_area_log')
         else:
             final_df['hotspot_area'] = df_metadata_raw['hotspot_area']
             dynamic_feature_cols.append('hotspot_area')
-
     if 'hotspot_avg_temp_change_rate_initial' in cfg.HANDCRAFTED_FEATURES_TO_EXTRACT and 'hotspot_avg_temp_change_rate_initial' in df_metadata_raw.columns:
         if cfg.NORMALIZE_AVG_RATE_INITIAL:
             final_df['hotspot_avg_temp_change_rate_initial_norm'] = df_metadata_raw.apply(
                 lambda r: r['hotspot_avg_temp_change_rate_initial'] / r['delta_T'] if r['delta_T'] != 0 and np.isfinite(r['hotspot_avg_temp_change_rate_initial']) else np.nan, axis=1)
-            dynamic_feature_cols.append(
-                'hotspot_avg_temp_change_rate_initial_norm')
+            dynamic_feature_cols.append('hotspot_avg_temp_change_rate_initial_norm')
         else:
             final_df['hotspot_avg_temp_change_rate_initial'] = df_metadata_raw['hotspot_avg_temp_change_rate_initial']
             dynamic_feature_cols.append('hotspot_avg_temp_change_rate_initial')
-
     special_features = ['hotspot_area', 'hotspot_avg_temp_change_rate_initial']
     for f_name in cfg.HANDCRAFTED_FEATURES_TO_EXTRACT:
         if f_name not in special_features and f_name in df_metadata_raw.columns:
             final_df[f_name] = df_metadata_raw[f_name]
             dynamic_feature_cols.append(f_name)
-
-    material_dummies = pd.get_dummies(
-        df_metadata_raw['material'], prefix='material', dtype=int)
+    material_dummies = pd.get_dummies(df_metadata_raw['material'], prefix='material', dtype=int)
     final_df = pd.concat([final_df, material_dummies], axis=1)
     context_feature_cols.extend(material_dummies.columns.tolist())
-
     all_feature_cols = context_feature_cols + dynamic_feature_cols
-    final_df[all_feature_cols] = final_df[all_feature_cols].fillna(
-        final_df[all_feature_cols].median())
+    final_df[all_feature_cols] = final_df[all_feature_cols].fillna(final_df[all_feature_cols].median())
     final_df.to_csv(METADATA_SAVE_PATH, index=False)
-    print(
-        f"\nSuccessfully saved metadata for {len(final_df)} samples to: {METADATA_SAVE_PATH}")
-
+    
+    print(f"\nSuccessfully saved metadata for {len(final_df)} samples to: {METADATA_SAVE_PATH}")
     save_dataset_parameters(
         output_dir=output_dir, dataset_type_str=DATASET_TYPE_STR,
         num_samples=len(final_df), final_df=final_df,
@@ -320,18 +271,13 @@ def create_dataset(dataset_type):
     )
 
     if failed_samples:
-        print(
-            f"\nWarning: {len(failed_samples)} samples failed during processing.")
-        for failed in failed_samples:
-            print(f"  - ID: {failed['video_id']}, Reason: {failed['error']}")
+        print(f"\nWarning: {len(failed_samples)} samples failed in total.")
 
     print(f"\n--- Dataset Creation Complete: {DATASET_TYPE_STR} ---")
 
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Generate a dataset for CNN-based models.")
-    parser.add_argument("--type", type=str, required=True, choices=['thermal', 'flow', 'hybrid','thermal_masked'],
+    parser = argparse.ArgumentParser(description="Generate a dataset for CNN-based models.")
+    parser.add_argument("--type", type=str, required=True, choices=['thermal', 'flow', 'hybrid', 'thermal_masked'],
                         help="The type of dataset to generate.")
     args = parser.parse_args()
     create_dataset(args.type)

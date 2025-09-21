@@ -100,9 +100,17 @@ class UltimateHybridRegressor(nn.Module):
             nn.BatchNorm1d(8)
         )
         self.dynamic_mlp = nn.Sequential(
-            nn.Linear(num_dynamic_features, 16),
+            # Layer 1: Input -> 32 features
+            nn.Linear(num_dynamic_features, 32),
+            nn.ReLU(),
+            nn.BatchNorm1d(32), 
+
+            # Layer 2: 32 features -> 16 features
+            nn.Linear(32, 16),  
             nn.ReLU(),
             nn.BatchNorm1d(16),
+
+            # Layer 3: 16 features -> 8 features (final output)
             nn.Linear(16, 8),
             nn.ReLU(),
             nn.BatchNorm1d(8)

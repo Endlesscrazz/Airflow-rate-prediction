@@ -182,9 +182,10 @@ def main():
     mae = mean_absolute_error(all_targets, all_outputs)
 
     print("\n--- Hold-Out Set Performance ---")
-    print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
-    print(f"Mean Absolute Error (MAE):    {mae:.4f}")
     print(f"R-squared (R²):               {r2:.4f}")
+    print(f"Mean Absolute Error (MAE):    {mae:.4f}")
+    print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
+    
 
     # 6. Plotting
     plt.figure(figsize=(8, 8))
@@ -225,16 +226,20 @@ if __name__ == "__main__":
     main()
 
 """
-single-final-model:
-python -m scripts.evaluate_holdout --model_type lstm \
-    --dataset_dir CNN_dataset/dataset_2ch_thermal_masked \
-    --in_channels 2 \
-    --optuna_tuned 
 
+ensmeble:
 python -m scripts.evaluate_holdout --model_type lstm \
-    --dataset_dir CNN_dataset/dataset_2ch_thermal_masked \
+    --dataset_dir CNN_dataset/dataset_2ch_thermal_masked_gyp_hdb \
     --in_channels 2 \
     --optuna_tuned \
     --ensemble
+
+single-final-model:
+python -m scripts.evaluate_holdout --model_type lstm \
+    --dataset_dir CNN_dataset/dataset_2ch_thermal_masked_gyp_hdb \
+    --in_channels 2 \
+    --optuna_tuned 
+
+
 
 """

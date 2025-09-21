@@ -123,7 +123,7 @@ def main():
 if __name__ == "__main__":
     main()
 """
-python -m scripts.split_data --input_csv CNN_dataset/dataset_2ch_thermal_masked/metadata.csv --random_state 41
+python -m scripts.split_data --input_csv CNN_dataset/dataset_2ch_thermal_masked_gyp_hdb/metadata.csv --random_state 41
 python -m scripts.split_data --input_csv output_feature_based/master_features.csv --random_state 44
 
 """

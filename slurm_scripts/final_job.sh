@@ -24,13 +24,13 @@
 
 # Example: Final Model for 2-ch Thermal+Mask ---
 MODEL_TYPE="lstm"
-DATASET_DIR="CNN_dataset/dataset_2ch_thermal_masked_f10s"
+DATASET_DIR="CNN_dataset/dataset_2ch_thermal_masked_gyp_hdb"
 IN_CHANNELS=2
 
-# Example: Final Model for 2-ch Thermal+Mask (one faling video removed from dataset)
-MODEL_TYPE="lstm"
-DATASET_DIR="CNN_dataset/dataset_2ch_thermal_masked"
-IN_CHANNELS=2
+# # Example: Final Model for 2-ch Thermal+Mask (one faling video removed from dataset)
+# MODEL_TYPE="lstm"
+# DATASET_DIR="CNN_dataset/dataset_2ch_thermal_masked"
+# IN_CHANNELS=2
 
 
 #==============================================================================

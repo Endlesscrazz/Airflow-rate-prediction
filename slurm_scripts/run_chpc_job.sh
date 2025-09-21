@@ -61,13 +61,13 @@ export CHPC_SCRATCH_DIR="/scratch/general/vast/u1527145"
 
 # Experiment 2: LSTM model on 2-ch Thermal + Mask
 MODEL_TYPE="lstm"
-DATASET_DIR="CNN_dataset/dataset_2ch_thermal_masked_f10s"
+DATASET_DIR="CNN_dataset/dataset_2ch_thermal_masked_gyp_hdb"
 IN_CHANNELS=2
 
 # Experiment 2.1: LSTM model on 2-ch Thermal + Mask (1-failing video removed from dataset)
-MODEL_TYPE="lstm"
-DATASET_DIR="CNN_dataset/dataset_2ch_thermal_masked"
-IN_CHANNELS=2
+# MODEL_TYPE="lstm"
+# DATASET_DIR="CNN_dataset/dataset_2ch_thermal_masked"
+# IN_CHANNELS=2
 
 
 # --- Experiment 3: Full 'lstm' model on 3-channel hybrid data ---

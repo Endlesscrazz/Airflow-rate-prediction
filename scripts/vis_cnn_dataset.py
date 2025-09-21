@@ -58,7 +58,7 @@ def visualize_dataset(dataset_dir, max_samples, output_dir_name):
     df_metadata = pd.read_csv(METADATA_PATH)
     samples_to_process = df_metadata
     if max_samples is not None and max_samples < len(df_metadata):
-        samples_to_process = df_metadata.sample(n=max_samples, random_state=cfg.RANDOM_STATE)
+        samples_to_process = df_metadata.sample(n=max_samples, random_state=43)
         print(f"Processing a random subset of {max_samples} samples.")
     
     for _, sample_row in tqdm(samples_to_process.iterrows(), total=len(samples_to_process), desc="Generating GIFs"):
@@ -144,4 +144,4 @@ if __name__ == "__main__":
     
     visualize_dataset(args.dataset_dir, max_s, output_dir_name)
 
-# python -m scripts.vis_cnn_dataset --dataset_dir "CNN_dataset/dataset_2ch_thermal_masked"
+# python -m scripts.vis_cnn_dataset --dataset_dir "CNN_dataset/dataset_2ch_thermal_masked_gyp_hdb"
