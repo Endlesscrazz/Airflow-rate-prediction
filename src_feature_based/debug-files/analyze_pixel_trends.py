@@ -171,9 +171,13 @@ if __name__ == "__main__":
 
 """
 Fluke_BrickCladding_2holes_0808_2025_noshutter
+    vid-1:
+    python -m src_feature_based.debug-files.analyze_pixel_trends \
+        /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0808_2025_noshutter/T1.4V_2025-08-08-19-44-50_20_32_12_.mat \
+        debug_ouputs/Fluke_BrickCladding_2holes_0808_2025_noshutter/vid-1
     vid-6:
     python -m src_feature_based.debug-files.analyze_pixel_trends \
-        datasets/Fluke_BrickCladding_2holes_0808_2025_noshutter/T1.8V_2025-08-08-19-04-55_20_28_8_.mat \
+        /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0808_2025_noshutter/T1.8V_2025-08-08-19-04-55_20_28_8_.mat \
         debug_ouputs/Fluke_BrickCladding_2holes_0808_2025_noshutter/vid-6
 """
 
@@ -181,17 +185,25 @@ Fluke_BrickCladding_2holes_0808_2025_noshutter
 Fluke_BrickCladding_2holes_0616_2025_noshutter
     vid-6:
     python -m src_feature_based.debug-files.analyze_pixel_trends \
-        datasets/Fluke_BrickCladding_2holes_0616_2025_noshutter/T1.4V_2.2Pa_2025-6-16-16-33-25_20_34_14_.mat \
-        debug_ouputs/Fluke_BrickCladding_2holes_0616_2025_noshutter/vid-1
+        /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0616_2025_noshutter/T2.0V_6.3Pa_2025-6-16-17-40-19_20_26_6_.mat \
+        debug_ouputs/Fluke_BrickCladding_2holes_0616_2025_noshutter/vid-6
 """
 
 """
 Fluke_BrickCladding_2holes_0805_2025_noshutter
-    vid-6:
-    python -m src_feature_based.debug-files.analyze_pixel_trends \
-        datasets/Fluke_BrickCladding_2holes_0805_2025_noshutter/T1.6V_2025-08-05-20-22-42_20_26_6_.mat \
-        debug_ouputs/Fluke_BrickCladding_2holes_0805_2025_noshutter/vid-3
+vid-3:
+python -m src_feature_based.debug-files.analyze_pixel_trends \
+    /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0805_2025_noshutter/T1.6V_2025-08-05-20-22-42_20_26_6_.mat \
+    debug_ouputs/Fluke_BrickCladding_2holes_0805_2025_noshutter/vid-3
 
+vid-5:
+python -m src_feature_based.debug-files.analyze_pixel_trends \
+    /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0805_2025_noshutter/T1.8V_2025-08-05-19-26-05_20_30_10_.mat \
+    debug_ouputs/Fluke_BrickCladding_2holes_0805_2025_noshutter/vid-5
+
+        
+
+        
 Fluke_HardyBoard_08132025_2holes_noshutter
     vid-4
     python -m src_feature_based.debug-files.analyze_pixel_trends \

@@ -1,55 +1,7 @@
-# universal_SAM_debug.py
-
-"""
-new-dataset:
-Fluke_BrickCladding_2holes_0808_2025_noshutter:
-  python scripts/debug_simple_SAM.py \
-  --input datasets/Fluke_BrickCladding_2holes_0808_2025_noshutter/T1.4V_2025-08-08-19-44-50_20_32_12_.mat \
-  --checkpoint SAM/sam_checkpoints/sam_vit_b_01ec64.pth \
-  --model_type vit_b \
-  --output_dir output_SAM/debug_masks/Fluke_BrickCladding_2holes_0808_2025_noshutter/T1.4V_2025-08-08-19-44-50_20_32_12_.mat/iter-1 \
-  --temporal_smooth_window 3 \
-  --roi_erosion 3 \
-  --activity_method kendall_tau \
-  --spatial_filter bilateral \
-  --roi_method border \
-  --num_leaks 2
-
-vid-6:
-  python scripts/debug_simple_SAM.py \
-  --input datasets/Fluke_BrickCladding_2holes_0808_2025_noshutter/T1.8V_2025-08-08-19-04-55_20_28_8_.mat \
-  --checkpoint SAM/sam_checkpoints/sam_vit_b_01ec64.pth \
-  --model_type vit_b \
-  --output_dir output_SAM/debug_masks/Fluke_BrickCladding_2holes_0808_2025_noshutter/T1.8V_2025-08-08-19-04-55_20_28_8_.mat \
-  --temporal_smooth_window 3 \
-  --roi_erosion 3 \
-  --activity_method kendall_tau \
-  --spatial_filter bilateral \
-  --roi_method border \
-  --num_leaks 2
-
-vid-10:
-  python scripts/debug_simple_SAM.py \
-  --input datasets/Fluke_BrickCladding_2holes_0808_2025_noshutter/T2.2V_2025-08-08-18-10-33_20_28_8_.mat \
-  --checkpoint SAM/sam_checkpoints/sam_vit_b_01ec64.pth \
-  --model_type vit_b \
-  --output_dir output_SAM/debug_masks/Fluke_BrickCladding_2holes_0808_2025_noshutter/T2.2V_2025-08-08-18-10-33_20_28_8_.mat \
-  --temporal_smooth_window 3 \
-  --roi_erosion 3 \
-  --activity_method kendall_tau \
-  --spatial_filter bilateral \
-  --roi_method border \
-  --num_leaks 2
-
-
-"""
-
 # debug_simple_SAM.py
 """
-UNIVERSAL & FLEXIBLE DEBUG SCRIPT (v3)
-- Integrates both Otsu and Border ROI methods, selectable via a command-line flag.
-- Use '--roi_method otsu' for high-contrast datasets (e.g., brick_cladding).
-- Use '--roi_method border' for low-contrast datasets (e.g., gypsum).
+A targeted script for debugging SAM segmentation on a single video file
+using manual point prompts with custom-sized bounding boxes.
 """
 
 import os
@@ -60,378 +12,176 @@ import scipy.io
 import cv2
 import torch
 import matplotlib.pyplot as plt
-from scipy.stats import kendalltau, mstats
-from tqdm import tqdm
-from joblib import Parallel, delayed
 
-# --- Ensure project modules are importable ---
 try:
-    import archive.src_feature_based.old_cfg as old_cfg
     from segment_anything import sam_model_registry, SamPredictor
 except ImportError:
-    try: from segment_anything import sam_model_registry, SamPredictor
-    except ImportError: print(f"Error: segment_anything library not found.", file=sys.stderr); sys.exit(1)
-    class MockConfig: MAT_FRAMES_KEY = 'TempFrames'
-    old_cfg = MockConfig()
+    print("Error: segment_anything library not found.", file=sys.stderr)
+    sys.exit(1)
 
 # ========================================================================================
-# --- HELPER & CORE FUNCTIONS ---
+# --- MANUAL PROMPTS DATABASE ---
+# Edit the coordinates and box_size for the video you are testing.
+# The key should be a unique part of the input filename.
+# ========================================================================================
+MANUAL_PROMPTS = {
+    "T1.6V_2025-08-08-19-20-36": [
+        {
+            "name": "center_hole",
+            "coord": (272, 328), # (row, col)
+            "box_size": 30       # Standard box size for the clear leak
+        },
+        {
+            "name": "bottom_left_hole",
+            "coord": (360, 140), # (row, col)
+            "box_size": 15       # A smaller, more precise box for the noisy leak
+        }
+    ],
+    "T1.8V_2025-08-08-18-53-18_20_32_12":[
+        {
+            "name": "center_hole",
+            "coord": (272, 328), # (row, col)
+            "box_size": 30       # Standard box size for the clear leak
+        },
+        {
+            "name": "bottom_left_hole",
+            "coord": (360, 140), # (row, col)
+            "box_size": 15       # A smaller, more precise box for the noisy leak
+        }
+    ]
+}
+
+# ========================================================================================
+# --- HELPER FUNCTIONS ---
 # ========================================================================================
 
-def save_parameters(args, output_dir):
-    """Saves the command-line arguments to a text file."""
-    params_path = os.path.join(output_dir, "parameters.txt")
-    with open(params_path, 'w') as f:
-        f.write("--- Run Parameters ---\n")
-        for arg, value in sorted(vars(args).items()): f.write(f"{arg}: {value}\n")
-    print(f"Saved run parameters to: {params_path}")
-
-def apply_spatial_filter(frames, filter_type='none', d=9, sigmaColor=75, sigmaSpace=75):
-    """(Optional) Applies a spatial filter to each frame to reduce noise."""
-    if filter_type.lower() == 'none':
-        print("\n  - Step 1: Skipping spatial filter.")
-        return frames
-    print(f"  - Step 1: Applying '{filter_type}' spatial filter to each frame...")
-    H, W, T = frames.shape
-    filtered_frames = np.zeros_like(frames, dtype=np.float64)
-    for i in tqdm(range(T), desc="    Filtering Frames Spatially", leave=False, ncols=100):
-        frame_8bit = cv2.normalize(frames[:, :, i], None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        if filter_type.lower() == 'bilateral':
-            filtered_frame_8bit = cv2.bilateralFilter(frame_8bit, d, sigmaColor, sigmaSpace)
-        else: filtered_frame_8bit = frame_8bit
-        min_val, max_val = np.min(frames[:,:,i]), np.max(frames[:,:,i])
-        filtered_frames[:, :, i] = cv2.normalize(filtered_frame_8bit.astype(np.float64), None, min_val, max_val, cv2.NORM_MINMAX)
-    return filtered_frames
-
-def apply_temporal_smoothing(frames, window_size):
-    """Applies a moving average filter along the time axis."""
-    if window_size <= 1: return frames
-    print(f"Step 1: Applying temporal smoothing (window: {window_size})...")
-    H, W, T = frames.shape
-    smoothed_frames = np.zeros_like(frames, dtype=np.float64)
-    kernel = np.ones(window_size) / window_size
-    for r in tqdm(range(H), desc="  Smoothing Frames", leave=False, ncols=100):
-        for c in range(W):
-            pixel_series = frames[r, c, :]
-            smoothed_series = np.convolve(pixel_series, kernel, mode='valid')
-            pad_before = (T - len(smoothed_series)) // 2
-            pad_after = T - len(smoothed_series) - pad_before
-            smoothed_frames[r, c, :] = np.pad(smoothed_series, (pad_before, pad_after), mode='edge')
-    return smoothed_frames
-
-def _calculate_slope_for_row(row_data, t, method):
-    """Helper for parallel calculation."""
-    W = row_data.shape[0]
-    row_values = np.zeros(W, dtype=np.float64)
-    for c in range(W):
-        pixel_series = row_data[c, :]
-        if not np.any(np.isnan(pixel_series)) and len(pixel_series) > 1:
-            try:
-                if method == 'theil_sen': val, _, _, _ = mstats.theilslopes(pixel_series, t, 0.95)
-                elif method == 'kendall_tau': val, _ = kendalltau(t, pixel_series)
-                else: val = 0.0
-            except (ValueError, IndexError): val = 0.0
-            row_values[c] = val if np.isfinite(val) else 0.0
-    return row_values
-
-def generate_activity_map(frames, method, env_para):
-    """Generates an activity map using the specified method."""
-    H, W, T = frames.shape
-    if T < 2: return np.zeros((H, W), dtype=np.float64)
-    t = np.arange(T)
-    print(f"\nStep 2: Calculating activity map using '{method}'...")
-    results = Parallel(n_jobs=-1)(
-        delayed(_calculate_slope_for_row)(frames[r, :, :], t, method) for r in tqdm(range(H), desc=f"  Processing Rows ({method})", leave=False, ncols=100)
-    )
-    raw_activity_map = np.vstack(results)
-    if env_para == 1: activity_map = raw_activity_map.copy(); activity_map[activity_map < 0] = 0
-    elif env_para == -1: activity_map = -raw_activity_map; activity_map[activity_map < 0] = 0
-    else: activity_map = np.abs(raw_activity_map)
-    return activity_map
-
-# --- NEW BORDER MASK FUNCTION (from notebook) ---
-def create_border_roi_mask(frame_shape, border_percent):
-    """Creates a simple binary mask that is False at the borders and True in the center."""
-    print(f"Step 3: Creating {border_percent*100:.0f}% border ROI mask...")
-    if not (0 <= border_percent < 0.5):
-        print("  - Warning: Invalid border percent. Using full frame for ROI.")
-        return np.ones(frame_shape, dtype=np.uint8)
-    H, W = frame_shape
-    border_h = int(H * border_percent)
-    border_w = int(W * border_percent)
-    roi_mask = np.zeros(frame_shape, dtype=np.uint8)
-    roi_mask[border_h : H - border_h, border_w : W - border_w] = 1
-    return roi_mask
-
-def create_panel_roi_mask(median_frame, erosion_iterations):
-    """Creates a binary mask for the panel via Otsu's thresholding."""
-    print("Step 3: Creating Panel ROI Mask via Otsu's Thresholding...")
-    frame_norm = cv2.normalize(median_frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    _, thresh = cv2.threshold(frame_norm, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(thresh, 4, cv2.CV_32S)
-    if num_labels <= 1: return np.ones_like(median_frame, dtype=np.uint8)
-    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
-    panel_mask = np.zeros_like(thresh); panel_mask[labels == largest_label] = 1
-    if erosion_iterations > 0:
-        kernel = np.ones((3, 3), np.uint8)
-        panel_mask = cv2.erode(panel_mask, kernel, iterations=erosion_iterations)
-    return panel_mask
-
-def find_prompts_by_peak_activity(activity_map, num_prompts, quantile_thresh):
-    """Finds prompts by selecting the N blobs with the highest peak activity."""
+def visualize_prompts_on_image(image, prompts, save_path, title):
+    """Visualizes point prompts and their bounding boxes on an image."""
+    plt.figure(figsize=(12, 9))
+    plt.imshow(image, cmap='gray')
     
-    print(f"\nStep 4: Finding the {num_prompts} most intense blobs (quantile: {quantile_thresh:.3f})...")
-    if activity_map is None or not np.any(activity_map > 1e-9): return [], []
-    active_pixels = activity_map[activity_map > 1e-9]
-    if active_pixels.size == 0: return [], []
-    activity_threshold = np.quantile(active_pixels, quantile_thresh)
-    binary_mask = (activity_map >= activity_threshold).astype(np.uint8)
-    kernel = np.ones((3,3), np.uint8)
-    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary_mask, connectivity=8)
-    if num_labels <= 1: return [], []
-    all_candidates = []
-    for i in range(1, num_labels):
-        component_mask = (labels == i)
-        peak_activity_value = np.max(activity_map[component_mask])
-        all_candidates.append({'centroid': centroids[i], 'stat': stats[i], 'peak_activity': peak_activity_value})
-    sorted_by_intensity = sorted(all_candidates, key=lambda x: x['peak_activity'], reverse=True)
-    top_candidates = sorted_by_intensity[:num_prompts]
-    return top_candidates, all_candidates
-
-def visualize_prompts(activity_map, all_candidates, final_prompts, save_path, method):
-    fig, ax = plt.subplots(figsize=(14, 10))
-    im = ax.imshow(activity_map, cmap='hot', vmin=0)
-    label = 'Activity (Theil-Sen Slope)' if method == 'theil_sen' else 'Activity (Kendall Tau Corr.)'
-    fig.colorbar(im, ax=ax, label=label)
-    #ax.set_title('Debug Map: Prompts from Most Intense Blobs')
-    ax.set_title('Step 3: Generating prompts for SAM model')
-    if all_candidates: ax.scatter([c['centroid'][0] for c in all_candidates], [c['centroid'][1] for c in all_candidates], s=100, facecolors='none', edgecolors='cyan', lw=1.5, label='All Found Blobs')
-    if final_prompts: ax.scatter(np.array([p['centroid'] for p in final_prompts])[:, 0], np.array([p['centroid'] for p in final_prompts])[:, 1], s=600, c='yellow', marker='*', edgecolor='black', label='Final Selected Prompts', zorder=5)
-    ax.legend(); fig.savefig(save_path); plt.close(fig)
-
-# def run_sam_with_box_prompts(frame_rgb, top_candidates, predictor):
-#     all_final_masks = []; predictor.set_image(frame_rgb)
-#     for cand in top_candidates:
-#         stat = cand['stat']
-#         x1, y1 = stat[cv2.CC_STAT_LEFT], stat[cv2.CC_STAT_TOP]
-#         x2, y2 = x1 + stat[cv2.CC_STAT_WIDTH], y1 + stat[cv2.CC_STAT_HEIGHT]
-#         input_box = np.array([x1, y1, x2, y2])
-#         masks, _, _ = predictor.predict(point_coords=None, point_labels=None, box=input_box[None, :], multimask_output=False)
-#         if len(masks) > 0: all_final_masks.append(masks[0])
-#     return all_final_masks
-
-## Less strict SAM prompts
-def run_sam_with_box_and_point_prompts(frame_rgb, top_candidates, predictor):
-    """
-    Runs SAM using both a bounding box and a center point prompt.
-    This encourages SAM to segment the entire plume within the box, not just the core.
-    """
-    all_final_masks = []; predictor.set_image(frame_rgb)
-    for cand in top_candidates:
-        stat = cand['stat']
+    for leak_def in prompts:
+        r, c = leak_def["coord"]
+        box_size = leak_def["box_size"]
+        box_half = box_size // 2
         
-        # Bounding Box (same as before)
-        x1, y1 = stat[cv2.CC_STAT_LEFT], stat[cv2.CC_STAT_TOP]
-        x2, y2 = x1 + stat[cv2.CC_STAT_WIDTH], y1 + stat[cv2.CC_STAT_HEIGHT]
+        # Plot the center point
+        plt.scatter(c, r, s=400, c='yellow', marker='*', edgecolor='black', label='Foreground Point')
+        
+        # Draw the bounding box
+        rect = plt.Rectangle((c - box_half, r - box_half), box_size, box_size,
+                             linewidth=1.5, edgecolor='cyan', facecolor='none', label=f'{box_size}x{box_size} Box')
+        plt.gca().add_patch(rect)
+            
+    plt.title(title)
+    handles, labels = plt.gca().get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    plt.legend(by_label.values(), by_label.keys())
+    plt.axis('off')
+    plt.savefig(save_path)
+    plt.close()
+
+def main(args):
+    print("--- SAM Debug Script (with Precise Box Prompts) ---")
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    # --- 1. Load Data and Model ---
+    print(f"Loading video: {args.input}")
+    mat_data = scipy.io.loadmat(args.input)
+    frames = mat_data['TempFrames'].astype(np.float64)
+    median_frame = np.median(frames, axis=2)
+    H, W = median_frame.shape
+
+    print("Loading SAM model...")
+    sam = sam_model_registry[args.model_type](checkpoint=args.checkpoint)
+    predictor = SamPredictor(sam)
+
+    # --- 2. Find and Visualize Manual Prompts ---
+    input_filename = os.path.basename(args.input)
+    prompts_to_use = None
+    for key in MANUAL_PROMPTS:
+        if key in input_filename:
+            prompts_to_use = MANUAL_PROMPTS[key]
+            break
+    
+    if not prompts_to_use:
+        print(f"Error: No manual prompts found for '{input_filename}' in the database.", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Found {len(prompts_to_use)} leak definitions to process.")
+    prompt_vis_path = os.path.join(args.output_dir, "DEBUG_01_manual_prompts_with_boxes.png")
+    visualize_prompts_on_image(median_frame, prompts_to_use, prompt_vis_path, "Manual Prompts on Median Frame")
+    print(f"Saved prompt visualization to: {prompt_vis_path}")
+
+    # --- 3. Run SAM to Generate Masks ---
+    print("Running SAM with point and precise box prompts...")
+    frame_norm_8bit = cv2.normalize(median_frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+    frame_rgb = cv2.cvtColor(frame_norm_8bit, cv2.COLOR_GRAY2BGR)
+    predictor.set_image(frame_rgb)
+    
+    final_masks = []
+    for leak_def in prompts_to_use:
+        r, c = leak_def["coord"]
+        box_size = leak_def["box_size"]
+        box_half = box_size // 2
+
+        # Create the point prompt
+        point_coords = np.array([[c, r]])
+        point_labels = np.array([1])
+
+        # Create the bounding box prompt
+        x1 = int(np.clip(c - box_half, 0, W-1))
+        y1 = int(np.clip(r - box_half, 0, H-1))
+        x2 = int(np.clip(c + box_half, 0, W-1))
+        y2 = int(np.clip(r + box_half, 0, H-1))
         input_box = np.array([x1, y1, x2, y2])
         
-        # Center Point (the centroid of the blob)
-        point_coords = cand['centroid'].reshape(1, 2)
-        point_labels = np.array([1]) # 1 indicates a positive foreground prompt
-
         masks, _, _ = predictor.predict(
             point_coords=point_coords,
             point_labels=point_labels,
-            box=input_box[None, :], # The bounding box provides the context
-            multimask_output=False,
+            box=input_box[None, :],
+            multimask_output=False
         )
-        if len(masks) > 0:
-            all_final_masks.append(masks[0])
-            
-    return all_final_masks
+        final_masks.append({"name": leak_def["name"], "mask": masks[0]})
 
-# ========================================================================================
-# --- MAIN EXECUTION SCRIPT ---
-# ========================================================================================
-def main(args):
-    """Main execution: Smooth -> Activity Map -> ROI -> Find Prompts -> SAM."""
-    print("--- Universal Hotspot Segmentation (Debug Mode) ---")
-    os.makedirs(args.output_dir, exist_ok=True)
-    save_parameters(args, args.output_dir)
+    # --- 4. Visualize and Save Final Output ---
+    print("Saving final output...")
+    final_vis_image = frame_rgb.copy()
+    colors = [[255, 255, 0], [0, 255, 255]] # Yellow, Cyan
+    for i, mask_info in enumerate(final_masks):
+        # Save the individual refined mask
+        mask_save_path = os.path.join(args.output_dir, f"{mask_info['name']}_mask.npy")
+        np.save(mask_save_path, mask_info["mask"])
+        print(f"  Saved mask to: {mask_save_path}")
 
-    print("\nLoading SAM model...")
-    try:
-        sam = sam_model_registry[args.model_type](checkpoint=args.checkpoint)
-        device = "cuda" if torch.cuda.is_available() else "cpu"; sam.to(device=device)
-        predictor = SamPredictor(sam)
-    except Exception as e:
-        print(f"Error loading SAM model: {e}", file=sys.stderr); sys.exit(1)
-
-    try:
-        mat_data = scipy.io.loadmat(args.input)
-        frames = mat_data[old_cfg.MAT_FRAMES_KEY].astype(np.float64)
-        H, W, T = frames.shape
-    except Exception as e:
-        print(f"  Error loading {args.input}: {e}", file=sys.stderr); sys.exit(1)
-    
-    # --- Execute Pipeline Step-by-Step ---
-    spatially_filtered_frames = apply_spatial_filter(frames, args.spatial_filter)
-    temporally_smoothed_frames = apply_temporal_smoothing(spatially_filtered_frames, args.temporal_smooth_window)
-    activity_map = generate_activity_map(temporally_smoothed_frames, args.activity_method, args.env_para)
-    
-    target_frame = np.median(frames, axis=2)
-
-    # --- NEW: Selectable ROI Method ---
-    if args.roi_method == 'border':
-        roi_mask = create_border_roi_mask((H, W), args.roi_border_percent)
-    else: # Default to 'otsu'
-        roi_mask = create_panel_roi_mask(target_frame, args.roi_erosion)
-
-    plt.imsave(os.path.join(args.output_dir, "DEBUG_roi_mask.png"), roi_mask, cmap='gray')
-
-    masked_activity_map = activity_map * roi_mask
-    
-    top_candidates, all_candidates = find_prompts_by_peak_activity(
-        masked_activity_map, args.num_leaks, args.activity_quantile
-    )
-
-    if not top_candidates:
-        print("Could not find any significant prompts after all filtering. Exiting.", file=sys.stderr); sys.exit(1)
-
-    base_filename = os.path.splitext(os.path.basename(args.input))[0]
-    debug_plot_path = os.path.join(args.output_dir, f"{base_filename}_prompt_verification.png")
-    visualize_prompts(masked_activity_map, all_candidates, top_candidates, debug_plot_path, args.activity_method)
-
-    print("\nRunning SAM segmentation...")
-    frame_normalized_8bit = cv2.normalize(target_frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    frame_rgb = cv2.cvtColor(frame_normalized_8bit, cv2.COLOR_GRAY2BGR)
-    #all_final_masks = run_sam_with_box_prompts(frame_rgb, top_candidates, predictor)
-    all_final_masks = run_sam_with_box_and_point_prompts(frame_rgb, top_candidates, predictor)
-
-    if not all_final_masks: print("SAM did not generate masks. Exiting.", file=sys.stderr); sys.exit(1)
-
-    # print("\nSaving final outputs...")
-    # final_combined_mask = np.zeros((H, W), dtype=bool)
-    # segmentation_image = frame_rgb.copy()
-    # colors = [[255, 255, 0], [0, 255, 255]]
-    # for i, mask in enumerate(all_final_masks):
-    #     color = colors[i % len(colors)]
-    #     color_overlay = np.zeros_like(segmentation_image); color_overlay[mask] = color
-    #     segmentation_image = cv2.addWeighted(segmentation_image, 1, color_overlay, 0.6, 0)
-    #     final_combined_mask = np.logical_or(final_combined_mask, mask)
-    # plot_save_path = os.path.join(args.output_dir, f"{base_filename}_sam_segmentation.png")
-    # cv2.imwrite(plot_save_path, segmentation_image)
-    # mask_save_path = os.path.join(args.output_dir, f"{base_filename}_sam_mask.npy")
-    # np.save(mask_save_path, final_combined_mask)
-    # print(f"  Saved outputs to {args.output_dir}")
-    # print("\n--- Modular debug script finished. ---")
-
-    print("\nSaving final outputs...")
-
-    final_combined_mask = np.zeros((H, W), dtype=bool)
-    segmentation_image = frame_rgb.copy()
-    colors = [[255, 255, 0], [0, 255, 255]]
-
-    for i, mask in enumerate(all_final_masks):
+        # Add to visualization
         color = colors[i % len(colors)]
-        color_overlay = np.zeros_like(segmentation_image)
-        color_overlay[mask] = color
-        segmentation_image = cv2.addWeighted(segmentation_image, 1, color_overlay, 0.6, 0)
-        final_combined_mask = np.logical_or(final_combined_mask, mask)
-
-    # Save segmentation with title using matplotlib
-    plot_save_path = os.path.join(args.output_dir, f"{base_filename}_sam_segmentation.png")
-
-    plt.figure(figsize=(8, 6))
-    plt.imshow(cv2.cvtColor(segmentation_image, cv2.COLOR_BGR2RGB))
-    plt.title("Step 4: Hotspot mask for the leaking holes")
-    plt.axis('off')
-    plt.tight_layout()
-    plt.savefig(plot_save_path, bbox_inches='tight', pad_inches=0.1)
-    plt.close()
-    print(f"  Saved segmentation plot with title to: {plot_save_path}")
-
-    # Save raw binary mask
-    mask_save_path = os.path.join(args.output_dir, f"{base_filename}_sam_mask.npy")
-    np.save(mask_save_path, final_combined_mask)
-
-    print("\n--- Modular debug script finished. ---")
-
+        color_overlay = np.zeros_like(final_vis_image); color_overlay[mask_info["mask"]] = color
+        final_vis_image = cv2.addWeighted(final_vis_image, 1, color_overlay, 0.6, 0)
+    
+    final_vis_path = os.path.join(args.output_dir, "FINAL_segmentation.png")
+    cv2.imwrite(final_vis_path, final_vis_image)
+    print(f"Saved final segmentation to: {final_vis_path}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Universal script for debugging hotspot segmentation on a SINGLE file.")
-    
-    parser.add_argument("--input", required=True, type=str)
-    parser.add_argument("--checkpoint", required=True, type=str)
-    parser.add_argument("--model_type", type=str, default="vit_b")
-    parser.add_argument("--output_dir", required=True, type=str)
-    
-    param_group = parser.add_argument_group('Pipeline Control Parameters')
-    param_group.add_argument("--num_leaks", type=int, default=2)
-    param_group.add_argument("--env_para", type=int, default=1, choices=[1, -1, 0])
-    param_group.add_argument("--activity_method", type=str, default="kendall_tau", choices=['theil_sen', 'kendall_tau'])
-    param_group.add_argument("--temporal_smooth_window", type=int, default=3)
-    param_group.add_argument("--activity_quantile", type=float, default=0.995)
-    param_group.add_argument("--spatial_filter", type=str, default="bilateral", choices=['none', 'bilateral'],
-                              help="Optional spatial filter to apply to each frame before other processing.")
-    
-    # --- NEW SELECTABLE ROI ARGUMENTS ---
-    param_group.add_argument("--roi_method", type=str, default="otsu", choices=['otsu', 'border'],
-                              help="Method for creating the Region of Interest mask.")
-    param_group.add_argument("--roi_border_percent", type=float, default=0.1,
-                              help="Border percentage to exclude if --roi_method is 'border'.")
-    param_group.add_argument("--roi_erosion", type=int, default=3,
-                              help="Number of erosion iterations for the 'otsu' ROI mask.")
-
+    parser = argparse.ArgumentParser(description="Debug SAM segmentation on a single file with precise box prompts.")
+    parser.add_argument("--input", required=True, type=str, help="Path to the input .mat video file.")
+    parser.add_argument("--checkpoint", required=True, type=str, help="Path to the SAM checkpoint file.")
+    parser.add_argument("--model_type", type=str, default="vit_b", help="SAM model type.")
+    parser.add_argument("--output_dir", required=True, type=str, help="Directory to save debug outputs.")
     args = parser.parse_args()
-    
-    if not os.path.isfile(args.input):
-        print(f"Error: Input file not found at '{args.input}'", file=sys.stderr); sys.exit(1)
-    if not os.path.isfile(args.checkpoint):
-        print(f"Error: SAM checkpoint not found at '{args.checkpoint}'", file=sys.stderr); sys.exit(1)
-        
     main(args)
 
 """
 python src_feature_based/debug-files/debug_simple_SAM.py \
-  --input datasets/Fluke_BrickCladding_2holes_0616_2025_noshutter/T1.4V_2.2Pa_2025-6-16-16-33-25_20_34_14_.mat \
+  --input /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0808_2025_noshutter/T1.6V_2025-08-08-19-20-36_20_32_12_.mat \
   --checkpoint SAM/sam_checkpoints/sam_vit_b_01ec64.pth \
-  --model_type vit_b \
-  --output_dir presentation_assets/Fluke_BrickCladding_2holes_0616_2025_noshutter/T1.4V_2.2Pa_2025-6-16-16-33-25_20_34_14 \
-  --temporal_smooth_window 3 \
-  --roi_erosion 3 \
-  --activity_method kendall_tau \
-  --spatial_filter bilateral \
-  --roi_method border \
-  --num_leaks 2
+  --output_dir debug_ouputs/Fluke_BrickCladding_2holes_0808_2025_noshutter/vid-3
 
-  
+vid-5:
 python src_feature_based/debug-files/debug_simple_SAM.py \
-  --input datasets/Fluke_Gypsum_07252025_noshutter/T1.6V_2025-07-28-17-36-55_20_34_14_.mat \
+  --input /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0808_2025_noshutter/T1.8V_2025-08-08-18-53-18_20_32_12_.mat \
   --checkpoint SAM/sam_checkpoints/sam_vit_b_01ec64.pth \
-  --model_type vit_b \
-  --output_dir presentation_assets/Fluke_Gypsum_07252025_noshutter/T1.6V_2025-07-28-17-36-55_20_34_14_.mat \
-  --temporal_smooth_window 3 \
-  --roi_erosion 3 \
-  --activity_method kendall_tau \
-  --spatial_filter bilateral \
-  --roi_method border \
-  --num_leaks 1
-
-Hardyboard:
-python src_feature_based/debug-files/debug_simple_SAM.py \
-  --input /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_08132025_2holes_noshutter/T1.8V_2025-08-15-17-56-33_21_32_11_.mat \
-  --checkpoint SAM/sam_checkpoints/sam_vit_b_01ec64.pth \
-  --model_type vit_b \
-  --output_dir Output_SAM/failing_masks/Fluke_HardyBoard_08132025_2holes_noshutter/T1.8V_2025-08-15-17-56-33_21_32_11 \
-  --temporal_smooth_window 3 \
-  --activity_quantile 0.99 \
-  --activity_method kendall_tau \
-  --spatial_filter bilateral \
-  --roi_method border \
-  --roi_border_percent 0.12 \
-  --num_leaks 2
-  
+  --output_dir debug_ouputs/Fluke_BrickCladding_2holes_0808_2025_noshutter/vid-5
 
 """

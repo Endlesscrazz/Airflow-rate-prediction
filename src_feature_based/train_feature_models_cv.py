@@ -79,33 +79,31 @@ def main():
         X_transformed['hotspot_avg_temp_change_rate_initial_norm'] = X_raw.apply(
             lambda r: r['hotspot_avg_temp_change_rate_initial'] / r['delta_T'] if r['delta_T'] != 0 and pd.notna(r['hotspot_avg_temp_change_rate_initial']) else np.nan, axis=1
         )
-    special_raw = ['delta_T', 'hotspot_area', 'hotspot_avg_temp_change_rate_initial', 'material']
+
+    special_raw = ['delta_T', 'hotspot_area', 'hotspot_avg_temp_change_rate_initial', 'material', 'session']
     other_features = [col for col in X_raw.columns if col not in special_raw]
     X_transformed = pd.concat([X_transformed, X_raw[other_features]], axis=1)
+
     X_transformed = pd.concat([X_transformed, pd.get_dummies(X_raw['material'], prefix='material', dtype=int)], axis=1)
+    X_transformed = pd.concat([X_transformed, pd.get_dummies(X_raw['session'], prefix='session', dtype=int)], axis=1)
     
     # Reindex to ensure consistent column order, adding missing columns if necessary
     print("\nCreating interaction features...")
     features_to_interact = [
-        'temperature_kurtosis',
-        'temp_std_avg_initial',
         'mean_area_significant_change',
         'hotspot_area_log',
         'hotspot_avg_temp_change_rate_initial_norm',
+        'mean_gradient_at_edge', 'temperature_kurtosis', 'temp_std_avg_initial',
+        'peak_to_average_ratio', 'circularity'
     ]
-    material_cols = [col for col in X_transformed.columns if col.startswith('material_')]
+    context_cols = [col for col in X_transformed.columns if col.startswith('material_') or col.startswith('session_')]
     
-    interaction_count = 0
     for feature in features_to_interact:
         if feature in X_transformed.columns:
-            for material_col in material_cols:
-                interaction_col_name = f"{feature}_x_{material_col.split('_')[-1]}"
-                # Add the new interaction feature to the main transformed dataframe
-                X_transformed[interaction_col_name] = X_transformed[feature] * X_transformed[material_col]
-                interaction_count += 1
+            for context_col in context_cols:
+                interaction_col_name = f"{feature}_x_{context_col}"
+                X_transformed[interaction_col_name] = X_transformed[feature] * X_transformed[context_col]
 
-    if interaction_count > 0:
-        print(f"Added {interaction_count} new interaction features.")
     
     # The SELECTED_FEATURES list in config.py should now include the interaction features you want to use
     X_dev = X_transformed.reindex(columns=cfg.SELECTED_FEATURES, fill_value=0)
@@ -115,8 +113,8 @@ def main():
     # 3. Augment Data (Optional)
     X_dev_final, y_dev_final, groups_dev_final = augment_features(
         X_dev, y_dev_original, groups_dev,
-        num_copies=4,       # to augment data
-        noise_level=0.02
+        num_copies=1,       # to augment data
+        noise_level=0.03
     )
     print(f"\nAugmented training set from {len(X_dev)} to {len(X_dev_final)} samples.")
     

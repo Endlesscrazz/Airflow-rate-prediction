@@ -1,149 +1,154 @@
-# create_combined_ground_truth.py
+# scripts/create_ground_truth_labels.py
 import os
 import pandas as pd
 import re
 
-# --- Helper functions ---
-
-def parse_voltage_from_filename(filename: str) -> float:
-    """Extracts the fan voltage from a filename (e.g., 'T1.4V_...')."""
+def parse_voltage_from_new_filename(filename: str) -> float:
     match = re.search(r'T(\d+(\.\d+)?)V', filename)
-    if match:
-        return float(match.group(1))
-    return None
+    return float(match.group(1)) if match else None
 
-def parse_delta_T(filename: str) -> float:
-    """Extracts delta T from a filename (e.g., '..._22_30_8_.mat' -> 8.0)."""
+def parse_delta_T_from_new_filename(filename: str) -> float:
     parts = filename.replace('.mat', '').split('_')
     try:
         if len(parts) > 3 and parts[-2].replace('.', '', 1).isdigit():
             return float(parts[-2])
-    except (ValueError, IndexError):
-        pass
-    return None
+    except (ValueError, IndexError): return None
 
-def parse_material_from_folder(folder_name: str) -> str:
-    """Extracts the material name from the dataset folder name."""
-    name = folder_name.lower()
-    if "gypsum" in name:
-        return "gypsum"
-    elif "brickcladding" in name:
-        return "brick_cladding"
-    elif "hardyboard" in name:
-        return "hardyboard"
-    return "unknown"
+def parse_voltage_from_old_foldername(foldername: str) -> float:
+    match = re.search(r'(\d+(\.\d+)?)V', foldername)
+    return float(match.group(1)) if match else None
+
+def parse_delta_T_from_old_filename(filename: str) -> float:
+    """
+    Extracts delta T from old-style filenames by searching backwards for the first numeric part.
+    This is more robust to variations in filename structure.
+    Example: '..._some_text_4.6_.mat' -> 4.6
+    """
+    parts = filename.replace('.mat', '').split('_')
+    # Iterate backwards from the second-to-last part to the beginning
+    for part in reversed(parts[:-1]): 
+        if part.replace('.', '', 1).isdigit():
+            try:
+                return float(part)
+            except ValueError:
+                continue 
+    return None # Return None if no numeric part is found
 
 
-# --- Main Script Logic ---
+def main():
+    DATASETS_ROOT = "/Volumes/One_Touch/Airflow-rate-prediction/datasets" 
+    OUTPUT_CSV_PATH = "airflow_ground_truth_hardyboard.csv"
 
-# IMPORTANT: Update this path to your external drive if needed
-DATASETS_ROOT = "/Volumes/One_Touch/Airflow-rate-prediction/datasets" 
-OUTPUT_CSV_PATH = "airflow_ground_truth_gypsum.csv"         # CHANGE THIS DEPEDNING ON MATERIAL TYPE WANT TO USE
-
-# --- CONFIGURE YOUR DATASETS HERE ---
-DATASET_FOLDERS = [
-    "Fluke_Gypsum_07162025_noshutter",
-    "Fluke_Gypsum_07252025_noshutter",
-    "Fluke_Gypsum_07292025_noshutter",
-    # "Fluke_BrickCladding_2holes_0616_2025_noshutter",
-    # "Fluke_BrickCladding_2holes_0805_2025_noshutter",
-    # "Fluke_BrickCladding_2holes_0808_2025_noshutter",
-    #"Fluke_HardyBoard_08132025_2holes_noshutter"
-]
-
-all_records = []
-total_videos_processed = 0
-
-print("Starting to process dataset folders...")
-
-for folder_name in DATASET_FOLDERS:
-    folder_path = os.path.join(DATASETS_ROOT, folder_name)
-    print(f"\nProcessing folder: {folder_name}")
-
-    if not os.path.isdir(folder_path):
-        print(f"  - WARNING: Folder not found. Skipping.")
-        continue
+    DATASET_CONFIGS = {
+        # New Gypsum
+        # "gypsum_0716": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07162025_noshutter", "structure_type": "new", "gt_file": "flow_rate.txt", "session": "gypsum_new"},
+        # "gypsum_0725": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07252025_noshutter", "structure_type": "new", "gt_file": "flow_rate.txt", "session": "gypsum_new"},
+        # "gypsum_0729": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07292025_noshutter", "structure_type": "new", "gt_file": "flow_rate.txt", "session": "gypsum_new"},
+        # # Old Gypsum
+        # "gypsum_0307": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_03072025", "structure_type": "old", "gt_file": "flow_rates.xlsx", "session": "gypsum_old"},
         
-    is_two_holes = "2holes" in folder_name.lower()
-    material = parse_material_from_folder(folder_name)
-    
-    video_files = [f for f in os.listdir(folder_path) if f.endswith('.mat') and not f.startswith('._')]
-    print(f"  - Found {len(video_files)} '.mat' video files.")
-    
-    try:
-        if is_two_holes:
-            # --- MODIFIED: Robust parsing for 2-hole files ---
-            gt_path = os.path.join(folder_path, "flow_rate_data.txt")
-            # Read the file, skip the header, and provide our own clean column names
-            gt_df = pd.read_csv(gt_path, delim_whitespace=True, header=None, skiprows=1,
-                                names=['V', 'Pa', 'rate_center', 'rate_corner'])
-        else:
-            # --- MODIFIED: Robust parsing for 1-hole files ---
-            gt_path = os.path.join(folder_path, "flow_rate.txt")
-            # Read the file, skip the header, and provide our own clean column names
-            gt_df = pd.read_csv(gt_path, delim_whitespace=True, header=None, skiprows=1,
-                                names=['V', 'Pa', 'rate_single'])
+        # # New HardyBoard
+        "hardyboard_0813": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_08132025_2holes_noshutter", "structure_type": "new", "gt_file": "flow_rate_data.txt", "session": "hardyboard_new"},
+        # # Old HardyBoard
+        # "hardyboard_0313": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_03132025", "structure_type": "old", "gt_file": "flow_rate.txt", "session": "hardyboard_old"},
+
+        # # Brick Cladding (treating them all as one session for now, can be split later if needed)
+        # "brick_cladding_0616": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0616_2025_noshutter", "structure_type": "new", "gt_file": "flowrate_data.txt", "session": "brick_cladding_all"},
+        # "brick_cladding_0805": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0805_2025_noshutter", "structure_type": "new", "gt_file": "flowrate_data.txt", "session": "brick_cladding_all"},
+        # "brick_cladding_0808": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0808_2025_noshutter", "structure_type": "new", "gt_file": "flowrate_data.txt", "session": "brick_cladding_all"},
+    }
+
+    all_records = []
+    print("Starting to process dataset folders...")
+
+    for config_key, config in DATASET_CONFIGS.items():
+        folder_path = os.path.join(DATASETS_ROOT, config['dataset_subfolder'])
+        print(f"\nProcessing folder: {config['dataset_subfolder']}")
+
+        if not os.path.isdir(folder_path):
+            print(f"  - WARNING: Folder not found. Skipping."); continue
+        
+        material, structure_type, gt_file, session = config['material'], config['structure_type'], config['gt_file'], config['session']
+        gt_path = os.path.join(folder_path, gt_file)
+        is_two_holes = "2holes" in config['dataset_subfolder'].lower()
+
+        try:
+            if gt_file.endswith('.xlsx'):
+                gt_df = pd.read_excel(gt_path, header=None, skiprows=1, names=['V_str', 'Pa', 'rate_single'])
+                gt_df['V'] = gt_df['V_str'].apply(lambda x: float(re.search(r'(\d+(\.\d+)?)', str(x)).group(1)))
+            else: 
+                if is_two_holes:
+                    gt_df = pd.read_csv(gt_path, sep='\s+', header=None, skiprows=1, names=['V', 'Pa', 'rate_1', 'rate_2'])
+                else:
+                    gt_df = pd.read_csv(gt_path, sep='\s+', header=None, skiprows=1, names=['V', 'Pa', 'rate_single'])
             
-        # Convert all loaded columns to numeric types
-        for col in gt_df.columns:
-            gt_df[col] = pd.to_numeric(gt_df[col])
-
-        print(f"  - Successfully loaded ground truth from: {os.path.basename(gt_path)}")
-    except FileNotFoundError:
-        print(f"  - ERROR: Ground truth file not found in '{folder_path}'. Skipping.")
-        continue
-    except Exception as e:
-        print(f"  - ERROR: Could not read ground truth file. Error: {e}. Skipping.")
-        continue
-
-    records_from_this_folder = 0
-    videos_processed_this_folder = 0
-
-    for filename in video_files:
-        video_id = filename.replace('.mat', '')
-        voltage = parse_voltage_from_filename(filename)
-        delta_T = parse_delta_T(filename)
-        
-        if voltage is None: continue
+            # <<< THE FIX: Ensure the 'V' column in the dataframe is a float type >>>
+            gt_df['V'] = gt_df['V'].astype(float)
             
-        gt_row = gt_df[gt_df['V'] == voltage]
-        if gt_row.empty:
-            print(f"  - WARNING: No ground truth for voltage {voltage} for file '{filename}'. Skipping.")
-            continue
-        
-        pressure = gt_row.iloc[0]['Pa']
-        videos_processed_this_folder += 1
+            print(f"  - Successfully loaded ground truth from: {gt_file}")
+        except Exception as e:
+            print(f"  - ERROR: Could not read GT file '{gt_path}'. Error: {e}. Skipping."); continue
 
-        if is_two_holes:
-            all_records.append({
-                'video_id': video_id, 'hole_id': '1_centerhole', 'airflow_rate': gt_row.iloc[0]['rate_center'],
-                'material': material, 'delta_T': delta_T, 'voltage': voltage, 'pressure_Pa': pressure
-            })
-            all_records.append({
-                'video_id': video_id, 'hole_id': '2_cornerhole', 'airflow_rate': gt_row.iloc[0]['rate_corner'],
-                'material': material, 'delta_T': delta_T, 'voltage': voltage, 'pressure_Pa': pressure
-            })
-            records_from_this_folder += 2
-        else:
-            all_records.append({
-                'video_id': video_id, 'hole_id': '1', 'airflow_rate': gt_row.iloc[0]['rate_single'],
-                'material': material, 'delta_T': delta_T, 'voltage': voltage, 'pressure_Pa': pressure
-            })
-            records_from_this_folder += 1
+        if structure_type == 'old':
+            processed_videos_count = 0
+            for subfolder_name in os.listdir(folder_path):
+                subfolder_path = os.path.join(folder_path, subfolder_name)
+                if os.path.isdir(subfolder_path):
+                    voltage = parse_voltage_from_old_foldername(subfolder_name)
+                    if voltage is None: continue
+                    
+                    gt_row = gt_df[gt_df['V'] == voltage]
+                    if gt_row.empty: continue
+                    
+                    pressure = gt_row.iloc[0]['Pa']
+                    rate_single = gt_row.iloc[0]['rate_single']
+                    
+                    video_files = [f for f in os.listdir(subfolder_path) if f.endswith('.mat') and not f.startswith('._')]
+                    for filename in video_files:
+                        video_id = filename.replace('.mat', '')
+                        delta_T = parse_delta_T_from_old_filename(filename) 
+                        all_records.append({
+                            'video_id': filename.replace('.mat', ''), 'hole_id': '1', 'airflow_rate': gt_row.iloc[0]['rate_single'],
+                            'material': material, 'delta_T': parse_delta_T_from_old_filename(filename), 
+                            'voltage': voltage, 'pressure_Pa': gt_row.iloc[0]['Pa'],
+                            'session': session 
+                        })
+                        processed_videos_count += 1
+            print(f"  - Processed {processed_videos_count} videos from 'old' structure.")
 
-    print(f"  - Processed {videos_processed_this_folder} videos, generating {records_from_this_folder} records.")
-    total_videos_processed += videos_processed_this_folder
+        else: # New structure
+            processed_videos_count = 0
+            video_files = [f for f in os.listdir(folder_path) if f.endswith('.mat') and not f.startswith('._')]
+            for filename in video_files:
+                video_id = filename.replace('.mat', '')
+                voltage = parse_voltage_from_new_filename(filename)
+                delta_T = parse_delta_T_from_new_filename(filename)
+                if voltage is None: continue
+                
+                gt_row = gt_df[gt_df['V'] == voltage]
+                if gt_row.empty: continue
+                
+                base_record = {'material': material, 'delta_T': delta_T, 'voltage': voltage, 'pressure_Pa': gt_row.iloc[0]['Pa'], 'session': session}
+                
+                if is_two_holes:
+                    all_records.append({'video_id': video_id, 'hole_id': '1_centerhole', 'airflow_rate': gt_row.iloc[0]['rate_1'], **base_record})
+                    all_records.append({'video_id': video_id, 'hole_id': '2_cornerhole', 'airflow_rate': gt_row.iloc[0]['rate_2'], **base_record})
+                else:
+                    all_records.append({'video_id': video_id, 'hole_id': '1', 'airflow_rate': gt_row.iloc[0]['rate_single'], **base_record})
+                processed_videos_count += 1
+            print(f"  - Processed {processed_videos_count} videos from 'new' structure.")
 
-if all_records:
-    final_df = pd.DataFrame(all_records)
-    final_df = final_df.sort_values(by=['material', 'voltage', 'delta_T']).reset_index(drop=True)
-    final_df.to_csv(OUTPUT_CSV_PATH, index=False)
-    print(f"\n Successfully created combined ground truth file at: {OUTPUT_CSV_PATH}")
-    print(f"Total videos processed: {total_videos_processed}")
-    print(f"Total records (hole-level samples) created: {len(final_df)}")
-    print("\nPreview of the first 5 rows:")
-    print(final_df.head())
-else:
-    print("\n No records were created. Please check folder paths and file contents.")
+    if all_records:
+        final_df = pd.DataFrame(all_records)
+        final_df = final_df.sort_values(by=['material', 'session', 'voltage', 'delta_T']).reset_index(drop=True)
+        final_df.to_csv(OUTPUT_CSV_PATH, index=False)
+        print(f"\nSuccessfully created combined ground truth file at: {OUTPUT_CSV_PATH}")
+        print(f"Total records created: {len(final_df)}")
+    else:
+        print("\nNo records were created.")
 
-# python src_feature_based/create_ground_truth_labels.py
+if __name__ == "__main__":
+    main()
+
+
+# python scripts/create_ground_truth_labels.py

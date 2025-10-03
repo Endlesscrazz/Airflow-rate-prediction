@@ -30,8 +30,8 @@ def get_models_and_grids():
     The models and grids are defined in the central config file.
     """
     models = {
-        #'XGBoost': XGBRegressor(random_state=cfg.RANDOM_STATE, n_jobs=-1),
-        'RandomForest': RandomForestRegressor(random_state=cfg.RANDOM_STATE, n_jobs=-1),
+        'XGBoost': XGBRegressor(random_state=cfg.RANDOM_STATE, n_jobs=-1),
+        #'RandomForest': RandomForestRegressor(random_state=cfg.RANDOM_STATE, n_jobs=-1),
         'SVR': SVR(),
         'MLPRegressor': MLPRegressor(
             max_iter=3000,
