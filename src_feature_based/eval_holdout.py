@@ -47,8 +47,24 @@ def main():
         X_transformed_holdout['hotspot_avg_temp_change_rate_initial_norm'] = X_raw_holdout.apply(
             lambda r: r['hotspot_avg_temp_change_rate_initial'] / r['delta_T'] if r['delta_T'] != 0 and pd.notna(r['hotspot_avg_temp_change_rate_initial']) else np.nan, axis=1
         )
-    
-    special_raw = ['delta_T', 'hotspot_area', 'hotspot_avg_temp_change_rate_initial', 'material']
+
+    if cfg.NORMALIZE_CUMULATIVE_FEATURES:
+        print("Normalizing new cumulative features by delta_T for holdout set...")
+        features_to_normalize = [
+            'cumulative_raw_delta_sum',
+            'cumulative_abs_delta_sum',
+            'auc_mean_temp_delta',
+            'mean_pixel_volatility'
+        ]
+        for feature in features_to_normalize:
+            if feature in X_raw_holdout.columns:
+                new_col_name = f"{feature}_norm"
+                X_transformed_holdout[new_col_name] = X_raw_holdout.apply(
+                    lambda r: r[feature] / r['delta_T'] if r['delta_T'] != 0 and pd.notna(r[feature]) else np.nan, axis=1
+                )
+
+    special_raw = ['delta_T', 'hotspot_area', 'hotspot_avg_temp_change_rate_initial', 'material',
+                   'cumulative_raw_delta_sum', 'cumulative_abs_delta_sum', 'auc_mean_temp_delta', 'mean_pixel_volatility']
     other_features = [col for col in X_raw_holdout.columns if col not in special_raw]
     X_transformed_holdout = pd.concat([X_transformed_holdout, X_raw_holdout[other_features]], axis=1)
     

@@ -35,7 +35,7 @@ DATASET_CONFIGS = {
     # "brick_cladding_0805": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0805_2025_noshutter"},
     # "brick_cladding_0808": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0808_2025_noshutter"},
     "hardyboard_0813": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_08132025_2holes_noshutter"},
-    # "hardyboard_0313": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_03132025"}, # OLD
+   # "hardyboard_0313": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_03132025"}, # OLD
 }
 
 # --- Feature Engineering Parameters ---
@@ -45,20 +45,27 @@ ALL_POSSIBLE_FEATURES = [
     'peak_pixel_temp_change_rate_initial', 'peak_pixel_temp_change_magnitude_initial', 'temp_mean_avg_initial',
     'temp_std_avg_initial', 'temp_min_overall_initial', 'temp_max_overall_initial',
     'stabilized_mean_deltaT', 'overall_mean_deltaT', 'max_abs_mean_deltaT',
-    'stabilized_std_deltaT', 'overall_std_deltaT', 'mean_area_significant_change',
-    'stabilized_area_significant_change', 'max_area_significant_change',
+    'stabilized_std_deltaT', 'overall_std_deltaT', 
+    # 'mean_area_significant_change','stabilized_area_significant_change', 'max_area_significant_change',
     'hotspot_solidity', 'time_to_peak_mean_temp',
-    'temperature_skewness', 'temperature_kurtosis', 'rate_of_std_change_initial', 'peak_to_average_ratio',
-    'radial_profile_0', 'radial_profile_1', 'radial_profile_2', 'radial_profile_3', 'radial_profile_4',
-    'bbox_area', 'bbox_aspect_ratio',
-    'perimeter','circularity','mean_gradient_at_edge',
-    'temp_p25','temp_p75','temp_iqr'
+    'temperature_skewness', 'temperature_kurtosis', 
+    # 'rate_of_std_change_initial', 'peak_to_average_ratio',
+    # 'radial_profile_0', 'radial_profile_1', 'radial_profile_2', 'radial_profile_3', 'radial_profile_4',
+    'bbox_area', 'bbox_aspect_ratio','perimeter',
+    'circularity','mean_gradient_at_edge',
+    # 'temp_p25','temp_p75','temp_iqr'
+    # Feature discussed in meeting
+    'cumulative_raw_delta_sum','cumulative_abs_delta_sum',
+    # Own idea feature
+    'auc_mean_temp_delta',
+    'mean_pixel_volatility',
     # 'num_hotspots', 'centroid_distance'
 ]
 
 SELECTED_FEATURES = [
 # NEW DATASET
-    # FOR GYPSUM
+
+# FOR GYPSUM
     # 'delta_T_log',
     # 'hotspot_area_log',
     # 'hotspot_avg_temp_change_rate_initial_norm',
@@ -68,153 +75,114 @@ SELECTED_FEATURES = [
     # 'temp_std_avg_initial',
     # 'temp_max_overall_initial',
 
-    # FOR BRICK-CLADDING
     # 'delta_T_log',
-    # 'hotspot_area_log',
-    # 'hotspot_avg_temp_change_rate_initial_norm',
-    # 'peak_pixel_temp_change_rate_initial',
-    # 'peak_pixel_temp_change_magnitude_initial',
     # 'temp_std_avg_initial',
-    # 'temp_min_overall_initial',
-    # 'temp_max_overall_initial',
-    # 'hotspot_solidity',
-    # 'temperature_skewness',
-    # 'temperature_kurtosis',
-    # #'rate_of_std_change_initial',
-    # # 'radial_profile_0',
-    # # 'radial_profile_3',
-    # # 'bbox_aspect_ratio',
-    # 'mean_gradient_at_edge',
-
-    # FOR HARDYBOARD
-    # 'delta_T_log',
-    # 'hotspot_area_log',
-    # 'hotspot_avg_temp_change_rate_initial_norm',
-    # 'hotspot_avg_temp_change_magnitude_initial',
-    # 'peak_pixel_temp_change_rate_initial',
+    # 'cumulative_raw_delta_sum_norm',
+    # 'cumulative_abs_delta_sum_norm',
     # 'temp_mean_avg_initial',
-    # 'temp_std_avg_initial',
-    # 'temp_min_overall_initial',
-    # 'temp_max_overall_initial',
-    # #'stabilized_mean_deltaT',
-    # #'mean_area_significant_change',
-    # #'hotspot_solidity',
-    # #'centroid_distance',
-    # 'time_to_peak_mean_temp',
     # 'temperature_skewness',
+    # 'temp_min_overall_initial',
     # 'temperature_kurtosis',
-    # 'mean_gradient_at_edge',
-
-    # RFCEV
-    # 'bbox_area',
-    # 'bbox_aspect_ratio',
-    # 'circularity',
-    # 'delta_T_log',
-    # 'hotspot_area_log',
-    # 'hotspot_avg_temp_change_magnitude_initial',
     # 'hotspot_avg_temp_change_rate_initial_norm',
-    # 'hotspot_solidity',
-    # 'max_abs_mean_deltaT',
-    # 'max_area_significant_change',
-    # 'mean_area_significant_change',
-    # 'mean_gradient_at_edge',
-    # 'overall_mean_deltaT',
-    # 'peak_pixel_temp_change_rate_initial',
-    # 'perimeter',
-    # 'radial_profile_0',
-    # 'radial_profile_3',
-    # 'radial_profile_4',
-    # 'rate_of_std_change_initial',
-    # 'stabilized_area_significant_change',
-    # 'stabilized_mean_deltaT',
+    # 'bbox_area'
+
+
+# FOR BRICK-CLADDING
+    # RFECV 
     # 'stabilized_std_deltaT',
-    # 'temp_iqr',
-    # 'temp_max_overall_initial',
-    # 'temp_mean_avg_initial',
-    # 'temp_min_overall_initial',
-    # 'temp_p25',
-    # 'temp_p75',
     # 'temp_std_avg_initial',
+    # 'cumulative_abs_delta_sum_norm',
+    # 'delta_T_log',
     # 'temperature_kurtosis',
-    # 'time_to_peak_mean_temp',
+    # 'mean_pixel_volatility_norm',
+    # 'hotspot_avg_temp_change_magnitude_initial',
+    # 'hotspot_avg_temp_change_rate_initial_norm',
+    # 'stabilized_mean_deltaT',
+    # 'temp_max_overall_initial',
+    # 'bbox_area',
 
-    'bbox_aspect_ratio',
-    'circularity',
+
+    # LASSO (BEST)
+    # 'stabilized_std_deltaT',
+    # 'cumulative_abs_delta_sum_norm',
+    # 'peak_pixel_temp_change_rate_initial',
+    # 'temperature_kurtosis',
+    # 'bbox_aspect_ratio',
+    # 'time_to_peak_mean_temp',
+    # 'peak_pixel_temp_change_magnitude_initial',
+    # 'delta_T_log',
+    # 'temp_mean_avg_initial',
+    # 'hotspot_avg_temp_change_rate_initial_norm',
+    # 'bbox_area',
+    # 'max_abs_mean_deltaT',
+
+# FOR HARDYBOARD
+    # RFECV BEST
+    # 'temp_std_avg_initial',
+    # 'overall_std_deltaT',
+    # 'temp_min_overall_initial',
+    # 'temp_mean_avg_initial',
+    # 'cumulative_abs_delta_sum_norm',
+    # 'stabilized_mean_deltaT',
+    # 'hotspot_area_log',
+    # 'stabilized_std_deltaT',
+    # 'bbox_area',
+    # 'max_abs_mean_deltaT',
+    # 'mean_pixel_volatility_norm',
+    # 'temperature_kurtosis',
+    # 'hotspot_solidity',
+    # 'temperature_skewness',
+    # 'auc_mean_temp_delta_norm',
+    # #'hotspot_avg_temp_change_rate_initial_norm'
+    # #'delta_T_log'
+
+
+    #LASSO
     'delta_T_log',
-    'hotspot_area_log',
-    'hotspot_avg_temp_change_magnitude_initial',
-    'mean_gradient_at_edge',
     'peak_pixel_temp_change_rate_initial',
-    'rate_of_std_change_initial',
     'stabilized_mean_deltaT',
-    'temp_iqr',
-    'temp_p75',
+    'hotspot_area_log',
     'temperature_kurtosis',
+    'peak_pixel_temp_change_magnitude_initial',
+    'bbox_aspect_ratio',
+    'mean_pixel_volatility_norm',
+    'hotspot_avg_temp_change_rate_initial_norm',
+    'hotspot_solidity',
+    'auc_mean_temp_delta_norm',
     'time_to_peak_mean_temp',
+    'stabilized_std_deltaT',
+    'mean_gradient_at_edge',
+
 
 ### OLD&NEW-DATASET
 # GYPSUM
-    # rfcev best
-    # 'delta_T_log',
-    # 'hotspot_area_log',
-    # 'hotspot_avg_temp_change_rate_initial_norm',
-    # 'hotspot_avg_temp_change_magnitude_initial',
-    # 'peak_pixel_temp_change_rate_initial',
+    # RFCEV BEST(session_id)
+    # 'cumulative_raw_delta_sum_norm',
+    # 'hotspot_area_log_x_session_gypsum_old',
+    # 'stabilized_std_deltaT',
+    # 'temp_std_avg_initial',
+    # 'temp_std_avg_initial_x_session_gypsum_old',
+
+    #RFCEV BEST(no session_id)
+    # 'cumulative_abs_delta_sum_norm',
+    # 'overall_std_deltaT',
     # 'temp_mean_avg_initial',
+    # 'temp_min_overall_initial',
     # 'temp_std_avg_initial',
-    # 'temp_max_overall_initial',
-    # 'stabilized_mean_deltaT',
-    # 'temperature_skewness',
-    # 'peak_to_average_ratio',
-    # 'mean_gradient_at_edge',
-    # 'hotspot_avg_temp_change_rate_initial_norm_x_session_gypsum_new',
-    # 'hotspot_avg_temp_change_rate_initial_norm_x_session_gypsum_old',
+    # 'delta_T_log'
 
-    # 'hotspot_area_log',
-    # 'hotspot_area_log_x_session_gypsum_new',
-    # 'hotspot_solidity',
-    # 'peak_to_average_ratio',
-    # 'perimeter',
-    # 'radial_profile_0',
-    # 'radial_profile_4',
-    # 'temp_std_avg_initial',
-    # 'temperature_kurtosis',
-    # 'temperature_skewness',
-
-    # lasso
-    # 'circularity',
-    # 'delta_T_log',
-    # 'hotspot_avg_temp_change_rate_initial_norm',
-    # 'hotspot_avg_temp_change_rate_initial_norm_x_session_gypsum_new',
-    # 'mean_area_significant_change',
-    # 'temp_std_avg_initial',
-    # 'temperature_skewness',
 
 # HARDYBOARD
-    #'circularity',
-    # 'delta_T_log',
-    # 'hotspot_area_log',
-    # 'hotspot_avg_temp_change_magnitude_initial',
-    # 'hotspot_avg_temp_change_rate_initial_norm',
-    # 'hotspot_avg_temp_change_rate_initial_norm_x_session_hardyboard_new',
-    # 'max_abs_mean_deltaT',
-    # 'max_area_significant_change',
-    # 'mean_gradient_at_edge_x_session_hardyboard_new',
-    # 'overall_mean_deltaT',
-    # #'radial_profile_3',
-    # 'rate_of_std_change_initial',
-    # #'stabilized_area_significant_change',
-    # 'stabilized_mean_deltaT',
-    # #'temp_iqr',
-    # 'temp_std_avg_initial',
-    # 'temperature_kurtosis_x_session_hardyboard_new',
+    
+
 ]
 
 # Feature transformation flags used during feature generation
 LOG_TRANSFORM_AREA = True
 NORMALIZE_AVG_RATE_INITIAL = True
+NORMALIZE_CUMULATIVE_FEATURES = True 
 TRUE_FPS = 5
-FOCUS_DURATION_SECONDS = 10
+FOCUS_DURATION_SECONDS = 15
 
 # --- Modeling and Evaluation Parameters ---
 RANDOM_STATE = 42

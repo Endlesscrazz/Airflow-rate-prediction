@@ -46,11 +46,10 @@ sklearn.set_config(enable_metadata_routing=True)
 
 def load_and_prepare_data() -> Tuple[pd.DataFrame, pd.Series, pd.Series]:
     """Loads the master features CSV and prepares the full feature matrix (X)
-       and target vector (y), avoiding redundant interaction terms."""
+       and target vector (y), applying all necessary transformations."""
     MASTER_CSV_PATH = os.path.join(cfg.OUTPUT_DIR, "master_features.csv")
     if not os.path.exists(MASTER_CSV_PATH):
-        print(f"Error: Master feature file not found. Run generate_features.py first.")
-        sys.exit(1)
+        sys.exit(f"Error: Master feature file not found. Run generate_features.py first.")
         
     df_master = pd.read_csv(MASTER_CSV_PATH)
     y_full = df_master['airflow_rate']
@@ -59,43 +58,44 @@ def load_and_prepare_data() -> Tuple[pd.DataFrame, pd.Series, pd.Series]:
     
     # --- Create a Comprehensive Feature Set ---
     X_transformed = pd.DataFrame(index=X_full.index)
-    if 'delta_T' in X_full.columns: X_transformed['delta_T_log'] = np.log1p(X_full['delta_T'])
-    if 'hotspot_area' in X_full.columns: X_transformed['hotspot_area_log'] = np.log1p(X_full['hotspot_area'])
-    if 'hotspot_avg_temp_change_rate_initial' in X_full.columns:
+    
+    # Perform transformations as defined in config
+    if 'delta_T' in X_full.columns:
+        X_transformed['delta_T_log'] = np.log1p(X_full['delta_T'])
+    if 'hotspot_area' in X_full.columns and cfg.LOG_TRANSFORM_AREA:
+        X_transformed['hotspot_area_log'] = np.log1p(X_full['hotspot_area'])
+    if 'hotspot_avg_temp_change_rate_initial' in X_full.columns and cfg.NORMALIZE_AVG_RATE_INITIAL:
         X_transformed['hotspot_avg_temp_change_rate_initial_norm'] = X_full.apply(
             lambda r: r['hotspot_avg_temp_change_rate_initial'] / r['delta_T'] if r['delta_T'] != 0 and pd.notna(r.get('hotspot_avg_temp_change_rate_initial')) else np.nan, axis=1
         )
-    special_raw = ['delta_T', 'hotspot_area', 'hotspot_avg_temp_change_rate_initial', 'material', 'session']
+        
+    if cfg.NORMALIZE_CUMULATIVE_FEATURES:
+        print("Normalizing new cumulative features by delta_T...")
+        features_to_normalize = [
+            'cumulative_raw_delta_sum', 'cumulative_abs_delta_sum',
+            'auc_mean_temp_delta', 'mean_pixel_volatility'
+        ]
+        for feature in features_to_normalize:
+            if feature in X_full.columns:
+                new_col_name = f"{feature}_norm"
+                X_transformed[new_col_name] = X_full.apply(
+                    lambda r: r[feature] / r['delta_T'] if r['delta_T'] != 0 and pd.notna(r[feature]) else np.nan, axis=1
+                )
+
+    # Define raw columns to exclude
+    special_raw = ['delta_T', 'hotspot_area', 'hotspot_avg_temp_change_rate_initial', 'material', 'session',
+                   'cumulative_raw_delta_sum', 'cumulative_abs_delta_sum', 'auc_mean_temp_delta', 'mean_pixel_volatility']
     other_features = [col for col in X_full.columns if col not in special_raw]
     X_transformed = pd.concat([X_transformed, X_full[other_features]], axis=1)
     
     # Create dummies
     material_dummies = pd.get_dummies(X_full['material'], prefix='material', dtype=int)
-    session_dummies = pd.get_dummies(X_full['session'], prefix='session', dtype=int)
-    X_transformed = pd.concat([X_transformed, material_dummies, session_dummies], axis=1)
+    X_transformed = pd.concat([X_transformed, material_dummies], axis=1)
+    # if 'session' in X_full.columns:
+    #     session_dummies = pd.get_dummies(X_full['session'], prefix='session', dtype=int)
+    #     X_transformed = pd.concat([X_transformed, session_dummies], axis=1)
     
-    features_to_interact = [
-        'hotspot_area_log', 'hotspot_avg_temp_change_rate_initial_norm', 'mean_gradient_at_edge', 
-        'temperature_kurtosis', 'temp_std_avg_initial', 'peak_to_average_ratio', 'circularity', 'hotspot_solidity'
-    ]
-
-    # Get all dummy columns (context)
-    context_cols = material_dummies.columns.tolist() + session_dummies.columns.tolist()
-    
-    print("\nCreating interaction features...")
-    for feature in features_to_interact:
-        if feature in X_transformed.columns:
-            for context_col in context_cols:
-                # Check if the context column is constant (all 0s or all 1s).
-                # A column is constant if it has only 1 unique value.
-                ## May need to modify this logic
-                if X_transformed[context_col].nunique() > 1:
-                    interaction_col_name = f"{feature}_x_{context_col}"
-                    X_transformed[interaction_col_name] = X_transformed[feature] * X_transformed[context_col]
-                else:
-                    print(f"  - Skipping interaction for '{context_col}' because it is constant (only one category present in data).")
-
-    print(f"\nFull feature matrix shape after interactions: {X_transformed.shape}")
+    print(f"\nFull feature matrix shape after transformations: {X_transformed.shape}")
     X_transformed.fillna(X_transformed.median(numeric_only=True), inplace=True)
     
     return X_transformed, y_full, groups
@@ -270,10 +270,13 @@ def main():
     # --- Print and Plot Final Results ---
     print("\n--- Top 20 Most Important Features ---")
     print(feature_importance_df.head(20).to_string())
+
+    ordered_selected_features = feature_importance_df[feature_importance_df['importance'] > 1e-5]['feature'].tolist()
     
-    print(f"\n\nOptimal feature set with {len(selected_features)} features (COPY THIS TO config.py):")
+    print(f"\n\nOptimal feature set with {len(ordered_selected_features)} features (COPY THIS TO config.py):")
     print("SELECTED_FEATURES = [")
-    for f in sorted(selected_features): print(f"    '{f}',")
+    for f in ordered_selected_features: 
+        print(f"    '{f}',")
     print("]")
 
     plt.figure(figsize=(10, 8))

@@ -133,7 +133,7 @@ def calculate_hotspot_features(frames, hotspot_mask, envir_para=-1, threshold_ab
     # 2) Initial Features (within Focus Duration)
     focus_duration_frames = int(cfg.FOCUS_DURATION_SECONDS * cfg.TRUE_FPS)
     actual_focus_frames = min(focus_duration_frames, N_total)
-    
+
     if actual_focus_frames >= 2:
         frames_focus = frames[:, :, :actual_focus_frames]
         time_vector = (np.arange(actual_focus_frames) / cfg.TRUE_FPS)
@@ -195,6 +195,40 @@ def calculate_hotspot_features(frames, hotspot_mask, envir_para=-1, threshold_ab
                 # temp_iqr: Interquartile range (p75-p25). Measures the spread of the central 50% of temperatures.
                 features['temp_iqr'] = features.get('temp_p75', np.nan) - features.get('temp_p25', np.nan)
 
+            # --- NEW FEATURE BLOCK 4: INTEGRATED/CUMULATIVE DYNAMIC FEATURES (as discussed) ---
+            
+            # Your Idea 1: Cumulative Raw Delta Sum
+            if 'cumulative_raw_delta_sum' in features:
+                # Sum of (T_t - T_1) over all frames for each pixel, then summed over all pixels.
+                # Captures net cumulative change. Can be close to zero if temp returns to start.
+                pixel_baselines = masked_pixels[:, 0].reshape(-1, 1) # Get T_1 for each pixel
+                pixel_deltas = masked_pixels - pixel_baselines # Subtract T_1 from all frames
+                features['cumulative_raw_delta_sum'] = np.sum(pixel_deltas)
+
+            # Your Idea 2: Cumulative Absolute Delta Sum
+            if 'cumulative_abs_delta_sum' in features:
+                # Sum of |T_t - T_1| over all frames for each pixel, then summed over all pixels.
+                # Captures total thermal "journey" away from the starting state. Robust to temp oscillations.
+                pixel_baselines = masked_pixels[:, 0].reshape(-1, 1)
+                pixel_deltas_abs = np.abs(masked_pixels - pixel_baselines)
+                features['cumulative_abs_delta_sum'] = np.sum(pixel_deltas_abs)
+                
+            # Suggested Feature 1: Area Under the Curve (AUC) of Mean Temperature Delta
+            if 'auc_mean_temp_delta' in features:
+                # Integrated change of the hotspot's average temperature over time.
+                # Robust to pixel noise. Captures both magnitude and duration of change.
+                delta_series = mean_series - mean_series[0]
+                auc = np.trapz(np.abs(delta_series), time_vector)
+                features['auc_mean_temp_delta'] = auc
+                
+            # Suggested Feature 2: Mean Pixel Volatility
+            if 'mean_pixel_volatility' in features:
+                # Measures the total frame-to-frame fluctuation for each pixel, averaged over the hotspot.
+                # High values indicate a "flickering" or unstable hotspot. Not biased by a noisy first frame.
+                frame_to_frame_diffs = np.diff(masked_pixels, axis=1)
+                pixel_volatilities = np.sum(np.abs(frame_to_frame_diffs), axis=1)
+                features['mean_pixel_volatility'] = np.nanmean(pixel_volatilities)
+
     # --- 3. Full Duration Features ---
     try:
         initial_frame_temp = np.nanmean(frames[hotspot_mask, 0])
@@ -241,6 +275,7 @@ def calculate_features_from_video(mat_filepath, mask_paths):
     if not mask_paths:
         print("Error: No mask paths provided.")
         return {name: np.nan for name in cfg.ALL_POSSIBLE_FEATURES}
+
 
     combined_mask = np.zeros(frames.shape[:2], dtype=bool)
     for mask_path in mask_paths:

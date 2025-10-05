@@ -283,5 +283,5 @@ if __name__ == "__main__":
     create_dataset(args.type)
 
 """
-python -m scripts.create_dataset --type thermal_masked
+python -m scripts.create_dataset_CNN --type thermal_masked
 """

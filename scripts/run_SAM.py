@@ -453,10 +453,16 @@ python -m scripts.run_SAM --dataset_dir /Volumes/One_Touch/Airflow-rate-predicti
     --num_leaks 2 \
     --roi_method border  
 
-python -m scripts.run_SAM --dataset_dir /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_Gypsum_07162025_noshutter \
-    --base_output_dir output_SAM/datasets/Fluke_Gypsum_07162025_noshutter \
-    --num_leaks 1 \
+python -m scripts.run_SAM --dataset_dir /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0616_2025_noshutter \
+    --base_output_dir output_SAM/datasets/Fluke_BrickCladding_2holes_0616_2025_noshutter \
+    --num_leaks 2 \
     --roi_method border  
+
+python -m scripts.run_SAM --dataset_dir /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_08132025_2holes_noshutter \
+    --base_output_dir output_SAM/datasets/Fluke_HardyBoard_08132025_2holes_noshutter \
+    --num_leaks 2 \
+    --roi_method border  \
+    --prompt_box_size 25
     
 """
 """
