@@ -1,0 +1,20 @@
+--- Run Parameters ---
+activity_method: kendall_tau
+activity_quantile: 0.995
+checkpoint: SAM/sam_checkpoints/sam_vit_b_01ec64.pth
+create_presentation_visual: True
+env_para: 1
+input: /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_Gypsum_09032025_10holes_noshutter/T5P_2025-10-7-11-38-40_35_23_12_.mat
+model_type: vit_b
+num_leaks: 10
+output_dir: debug_ouputs/Fluke_Gypsum_09032025_10holes_noshutter/vid-1/iter-1-local-peak
+peak_abs_threshold: 0.2
+peak_min_distance: 50
+processing_mode: multi_hole_filter
+prompt_box_size: 30
+prompt_method: local_peak
+roi_border_percent: 0.1
+roi_erosion: 3
+roi_method: border
+spatial_filter: bilateral
+temporal_smooth_window: 3

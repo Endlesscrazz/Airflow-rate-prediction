@@ -201,12 +201,15 @@ python -m src_feature_based.debug-files.analyze_pixel_trends \
     /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0805_2025_noshutter/T1.8V_2025-08-05-19-26-05_20_30_10_.mat \
     debug_ouputs/Fluke_BrickCladding_2holes_0805_2025_noshutter/vid-5
 
-        
-
-        
 Fluke_HardyBoard_08132025_2holes_noshutter
     vid-4
     python -m src_feature_based.debug-files.analyze_pixel_trends \
         /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_08132025_2holes_noshutter/T1.4V_2025-08-15-18-45-57_21_32_11_.mat \
         debug_ouputs/Fluke_HardyBoard_08132025_2holes_noshutter/vid-4
+
+
+        
+python -m src_feature_based.debug-files.analyze_pixel_trends \
+    /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_Gypsum_09032025_10holes_noshutter/T5P_2025-10-7-11-38-40_35_23_12_.mat \
+    debug_ouputs/Fluke_Gypsum_09032025_10holes_noshutter/vid-1
 """

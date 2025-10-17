@@ -132,7 +132,7 @@ def main():
     # 3. Augment Data (Optional)
     X_dev_final, y_dev_final, groups_dev_final = augment_features(
         X_dev, y_dev_original, groups_dev, 
-        num_copies=1, noise_level=0.03
+        num_copies=0, noise_level=0.03
     )
     print(
         f"\nAugmented training set from {len(X_dev)} to {len(X_dev_final)} samples.")

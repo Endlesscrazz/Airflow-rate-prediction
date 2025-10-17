@@ -1,14 +1,13 @@
 #!/bin/bash
 
 #==============================================================================
-# SBATCH Directives
+# SBATCH Directives for V2 Model Training
 #==============================================================================
 #SBATCH --account=soc-gpu-kp
 #SBATCH --partition=soc-gpu-kp
-#SBATCH --job-name=airflow-cnn-cv
-#SBATCH --array=0-4
-#SBATCH --output=logs/cnn_lstm_cv_%A_%a.out
-#SBATCH --time=03:00:00
+#SBATCH --job-name=airflow-v2-train
+#SBATCH --output=logs/v2_training_%j.out
+#SBATCH --time=04:00:00  # Adjust as needed
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -21,12 +20,12 @@
 # Environment Setup
 #==============================================================================
 PROJECT_NAME="Airflow-rate-prediction"
-CONDA_ENV_NAME="airflow_cnn_env"
+CONDA_ENV_NAME="airflow_cnn_env" # Or your new env name
 USER_SCRATCH_DIR="/scratch/general/vast/u1527145"
 PROJECT_DIR="${USER_SCRATCH_DIR}/${PROJECT_NAME}"
 
 echo "========================================================"
-echo "Job Array ID: $SLURM_ARRAY_JOB_ID, Task ID: $SLURM_ARRAY_TASK_ID"
+echo "Job ID: $SLURM_JOB_ID"
 echo "Job starting on $(date)"
 echo "Running on host: $(hostname)"
 echo "Project Directory: $PROJECT_DIR"
@@ -51,46 +50,13 @@ echo "--- GPU Info ---"
 nvidia-smi
 echo "----------------"
 
-export CHPC_SCRATCH_DIR="/scratch/general/vast/u1527145"
-
-# Experiment 1: LSTM model on 1-ch Thermal (Hard Crop) ---
-
-# MODEL_TYPE="lstm"
-# DATASET_DIR="CNN_dataset/dataset_1ch_thermal_hard_crop"
-# IN_CHANNELS=1
-
-# Experiment 2: LSTM model on 2-ch Thermal + Mask
-MODEL_TYPE="lstm"
-DATASET_DIR="CNN_dataset/hardyboard_all_dataset/dataset_2ch_thermal_masked"
-IN_CHANNELS=2
-
-# Experiment 2.1: LSTM model on 2-ch Thermal + Mask (1-failing video removed from dataset)
-# MODEL_TYPE="lstm"
-# DATASET_DIR="CNN_dataset/dataset_2ch_thermal_masked"
-# IN_CHANNELS=2
-
-
-# --- Experiment 3: Full 'lstm' model on 3-channel hybrid data ---
-# To run this, comment out the other blocks and uncomment this one.
-# MODEL_TYPE="lstm"
-# DATASET_DIR="cnn_dataset/dataset_cnn_lstm_3-channel"
-# IN_CHANNELS=3
-
 #==============================================================================
-# Run the Training Script
+# Run the V2 Training Script
 #==============================================================================
-echo "--- Starting Training for Fold ${SLURM_ARRAY_TASK_ID} ---"
+echo "--- Starting V2 Model Training ---"
 
-TOTAL_FOLDS=$((${SLURM_ARRAY_TASK_MAX} + 1))
-echo "Running with Fold: ${SLURM_ARRAY_TASK_ID}, Total Folds: ${TOTAL_FOLDS}"
-
-python -m src_cnn.train \
-    --fold ${SLURM_ARRAY_TASK_ID} \
-    --total_folds ${TOTAL_FOLDS} \
-    --model_type "${MODEL_TYPE}" \
-    --dataset_dir "${PROJECT_DIR}/${DATASET_DIR}" \
-    --in_channels ${IN_CHANNELS}
+python src_cnn_v2/train_v2.py
 
 echo "========================================================"
-echo "Job Task ${SLURM_ARRAY_TASK_ID} finished on $(date)"
+echo "Training job finished on $(date)"
 echo "========================================================"

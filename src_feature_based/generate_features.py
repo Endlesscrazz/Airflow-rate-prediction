@@ -14,7 +14,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
 from src_feature_based import config as cfg
-from src_feature_based import feature_engineering
+from src_feature_based import feature_engineering_fb
 
 # <<< MODIFIED FUNCTION: More robust path finding >>>
 def find_mask_for_hole(video_id, hole_id, mask_parent_dir, dataset_subfolder, voltage=None, is_old_structure=False):
@@ -88,7 +88,7 @@ def main():
             continue
             
         try:
-            extracted_features = feature_engineering.calculate_features_from_video(mat_filepath, mask_paths)
+            extracted_features = feature_engineering_fb.calculate_features_from_video(mat_filepath, mask_paths)
             record = sample_row.to_dict(); record.update(extracted_features)
             all_features_list.append(record)
         except Exception as e:

@@ -15,7 +15,7 @@ RAW_MASK_PARENT_DIR = os.path.join(PROJECT_ROOT, "Output_SAM/datasets")
 # Path to the ground truth airflow data. We'll look for it in the root.
 #GROUND_TRUTH_CSV_PATH = os.path.join(PROJECT_ROOT, "airflow_ground_truth_combined.csv")
 # for single material only
-GROUND_TRUTH_CSV_PATH = os.path.join(PROJECT_ROOT, "airflow_ground_truth_hardyboard.csv")
+GROUND_TRUTH_CSV_PATH = os.path.join(PROJECT_ROOT, "airflow_ground_truth_gypsum_8_hole.csv")
 # Output directory for all generated files for this pipeline.
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output_feature_based")
 
@@ -31,10 +31,12 @@ DATASET_CONFIGS = {
     # "gypsum_0729": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07292025_noshutter"},
 
     # "gypsum_0307": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_03072025"},  # OLD
+
+    "gypsum_0903": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_09032025_10holes_noshutter"}
     # "brick_cladding_0616": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0616_2025_noshutter"},
     # "brick_cladding_0805": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0805_2025_noshutter"},
     # "brick_cladding_0808": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0808_2025_noshutter"},
-    "hardyboard_0813": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_08132025_2holes_noshutter"},
+    # "hardyboard_0813": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_08132025_2holes_noshutter"},
    # "hardyboard_0313": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_03132025"}, # OLD
 }
 
@@ -86,6 +88,31 @@ SELECTED_FEATURES = [
     # 'hotspot_avg_temp_change_rate_initial_norm',
     # 'bbox_area'
 
+# GYPSUM 8 HOLE
+    #RFECV
+    'hotspot_avg_temp_change_rate_initial_norm',
+    'cumulative_raw_delta_sum_norm',
+    'cumulative_abs_delta_sum_norm',
+    'auc_mean_temp_delta_norm',
+    'hotspot_avg_temp_change_magnitude_initial',
+    'peak_pixel_temp_change_magnitude_initial',
+    'temp_mean_avg_initial',
+    'temp_std_avg_initial',
+    'temp_max_overall_initial',
+    'stabilized_mean_deltaT',
+    'overall_mean_deltaT',
+    'max_abs_mean_deltaT',
+    'stabilized_std_deltaT',
+    'overall_std_deltaT',
+    'mean_gradient_at_edge',
+
+    # 'cumulative_abs_delta_sum_norm',
+    # 'temp_max_overall_initial',
+    # 'temp_std_avg_initial',
+    # 'temp_mean_avg_initial',
+    # 'circularity',
+    # 'bbox_area',
+    # 'overall_std_deltaT',
 
 # FOR BRICK-CLADDING
     # RFECV 
@@ -138,20 +165,20 @@ SELECTED_FEATURES = [
 
 
     #LASSO
-    'delta_T_log',
-    'peak_pixel_temp_change_rate_initial',
-    'stabilized_mean_deltaT',
-    'hotspot_area_log',
-    'temperature_kurtosis',
-    'peak_pixel_temp_change_magnitude_initial',
-    'bbox_aspect_ratio',
-    'mean_pixel_volatility_norm',
-    'hotspot_avg_temp_change_rate_initial_norm',
-    'hotspot_solidity',
-    'auc_mean_temp_delta_norm',
-    'time_to_peak_mean_temp',
-    'stabilized_std_deltaT',
-    'mean_gradient_at_edge',
+    # 'delta_T_log',
+    # 'peak_pixel_temp_change_rate_initial',
+    # 'stabilized_mean_deltaT',
+    # 'hotspot_area_log',
+    # 'temperature_kurtosis',
+    # 'peak_pixel_temp_change_magnitude_initial',
+    # 'bbox_aspect_ratio',
+    # 'mean_pixel_volatility_norm',
+    # 'hotspot_avg_temp_change_rate_initial_norm',
+    # 'hotspot_solidity',
+    # 'auc_mean_temp_delta_norm',
+    # 'time_to_peak_mean_temp',
+    # 'stabilized_std_deltaT',
+    # 'mean_gradient_at_edge',
 
 
 ### OLD&NEW-DATASET
@@ -211,7 +238,7 @@ PARAM_GRIDS = {
         'model__kernel': ['rbf'],
     },
     'MLPRegressor': {
-        'model__hidden_layer_sizes': [(5,), (15,5), (10, 10), (20, 10)], 
+        'model__hidden_layer_sizes': [(5,), (15,5), (30,30, 10), (50, 30, 10)], 
         'model__activation': ['relu', 'tanh'],
         'model__alpha': [0.1, 1.0, 5.0], # A wider range for regularization
         'model__learning_rate_init': [0.001, 0.01],

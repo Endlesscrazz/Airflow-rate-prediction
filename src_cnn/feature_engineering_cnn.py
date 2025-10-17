@@ -1,8 +1,8 @@
-# src_cnn/feature_engineering.py
+# src_feature_based/feature_engineering.py
 """
 Contains functions for calculating a comprehensive suite of handcrafted summary-statistic
 features from thermal videos. This module is driven by the central configuration 
-file (src_cnn/config.py) and is a refactored version of the original feature
+file (src_feature_based/config.py) and is a refactored version of the original feature
 engineering logic to ensure all capabilities are preserved.
 """
 import numpy as np
@@ -36,15 +36,18 @@ def calculate_radial_profile(frame_data, mask, center_y, center_x, num_bins=5):
     profile = [np.nanmean(masked_values[bin_indices == i]) if np.any(bin_indices == i) else np.nan for i in range(num_bins)]
     return profile
 
+# main function
 def calculate_hotspot_features(frames, hotspot_mask, envir_para=-1, threshold_abs_change=0.5):
     """
     Calculates a suite of handcrafted features for a given video sequence and mask.
     All parameters are pulled from the central config file.
     """
-    features = {name: np.nan for name in cfg.HANDCRAFTED_FEATURES_TO_EXTRACT}
+    features = {name: np.nan for name in cfg.ALL_FEATURES_TO_CALCULATE}
     
-    if frames is None or frames.ndim != 3 or frames.shape[2] < 2: return features
-    if hotspot_mask is None or not np.any(hotspot_mask): return features
+    if frames is None or frames.ndim != 3 or frames.shape[2] < 2: 
+        return features
+    if hotspot_mask is None or not np.any(hotspot_mask): 
+        return features
 
     H, W, N_total = frames.shape
     mask_uint8 = hotspot_mask.astype(np.uint8)
@@ -67,11 +70,13 @@ def calculate_hotspot_features(frames, hotspot_mask, envir_para=-1, threshold_ab
                 cX = int(M["m10"] / M["m00"])
                 cY = int(M["m01"] / M["m00"])
 
+            # Bounding Box Features
             if 'bbox_area' in features or 'bbox_aspect_ratio' in features:
                 x, y, w, h = cv2.boundingRect(all_points)
                 features['bbox_area'] = w * h
                 features['bbox_aspect_ratio'] = w / h if h > 0 else 0
             
+            # solidity
             if 'hotspot_solidity' in features:
                 hull = cv2.convexHull(all_points)
                 hull_area = cv2.contourArea(hull)
@@ -82,21 +87,53 @@ def calculate_hotspot_features(frames, hotspot_mask, envir_para=-1, threshold_ab
                 if features.get('num_hotspots', 0) == 2 and len(centroids) > 2:
                     p1, p2 = centroids[1], centroids[2]
                     features['centroid_distance'] = np.sqrt(np.sum((p1 - p2)**2))
+            
+            # NEW FEATURE BLOCK 1: Advanced Shape Features 
+            if 'perimeter' in features:
+                # perimeter: The length of the hotspot's boundary. Used to calculate circularity.
+                features['perimeter'] = cv2.arcLength(all_points, True)
+            
+            if 'circularity' in features:
+                # circularity: Measures how close the hotspot shape is to a perfect circle (1.0). Distinguishes between round and irregular leaks.
+                p = features.get('perimeter', 0)
+                a = features.get('hotspot_area', 0)
+                if p > 0:
+                    features['circularity'] = (4 * np.pi * a) / (p**2)
+
     except Exception as e:
         print(f"Warning: Geometry feature calculation failed: {e}")
 
+    median_frame = np.median(frames, axis=2) # Calculate median frame once for reuse
+
     if np.isfinite(cX) and np.isfinite(cY):
         if any(f.startswith('radial_profile_') for f in features):
-            median_frame = np.median(frames, axis=2)
             radial_vals = calculate_radial_profile(median_frame, hotspot_mask, cY, cX, num_bins=5)
             for i in range(5):
                 if f'radial_profile_{i}' in features:
                     features[f'radial_profile_{i}'] = radial_vals[i]
 
-    # --- 2. Initial Features (within Focus Duration) ---
+    # NEW FEATURE BLOCK 2: Gradient / Edge Sharpness Feature 
+    if 'mean_gradient_at_edge' in features:
+        # mean_gradient_at_edge: Measures the "sharpness" of the thermal blob's edge. High values suggest an intense, focused leak.
+        try:
+            grad_x = cv2.Sobel(median_frame, cv2.CV_64F, 1, 0, ksize=3)
+            grad_y = cv2.Sobel(median_frame, cv2.CV_64F, 0, 1, ksize=3)
+            grad_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+            
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5,5))
+            dilated_mask = cv2.dilate(mask_uint8, kernel, iterations=1)
+            border_mask = (dilated_mask - mask_uint8).astype(bool)
+            
+            if np.any(border_mask):
+                features['mean_gradient_at_edge'] = np.nanmean(grad_magnitude[border_mask])
+        except Exception as e:
+            print(f"Warning: Gradient feature calculation failed: {e}")
+
+
+    # 2) Initial Features (within Focus Duration)
     focus_duration_frames = int(cfg.FOCUS_DURATION_SECONDS * cfg.TRUE_FPS)
     actual_focus_frames = min(focus_duration_frames, N_total)
-    
+
     if actual_focus_frames >= 2:
         frames_focus = frames[:, :, :actual_focus_frames]
         time_vector = (np.arange(actual_focus_frames) / cfg.TRUE_FPS)
@@ -134,12 +171,63 @@ def calculate_hotspot_features(frames, hotspot_mask, envir_para=-1, threshold_ab
                 peak_idx = np.argmax(np.abs(diff_series))
                 features['time_to_peak_mean_temp'] = time_vector[peak_idx]
 
-            if 'peak_to_average_ratio' in features and features.get('temp_mean_avg_initial', 0) != 0:
-                features['peak_to_average_ratio'] = features.get('temp_max_overall_initial', np.nan) / features.get('temp_mean_avg_initial', np.nan)
+            if 'peak_to_average_ratio' in features:
+                # peak_to_average_ratio: Ratio of the hottest pixel to the average temp. High values indicate a very focused, intense hotspot.
+                mean_temp = np.nanmean(mean_series)
+                max_temp = np.nanmax(masked_pixels)
+                if mean_temp != 0:
+                    features['peak_to_average_ratio'] = max_temp / mean_temp
             
             flat_pixels = masked_pixels.flatten()
+            flat_pixels = flat_pixels[~np.isnan(flat_pixels)] # Ensure no NaNs for stats
+
             if 'temperature_skewness' in features: features['temperature_skewness'] = skew(flat_pixels)
             if 'temperature_kurtosis' in features: features['temperature_kurtosis'] = kurtosis(flat_pixels)
+
+            # NEW FEATURE BLOCK 3: Temperature Distribution Features 
+            if 'temp_p25' in features:
+                # temp_p25: The 25th percentile temperature. 
+                features['temp_p25'] = np.percentile(flat_pixels, 25)
+            if 'temp_p75' in features:
+                # temp_p75: The 75th percentile temperature. 
+                features['temp_p75'] = np.percentile(flat_pixels, 75)
+            if 'temp_iqr' in features:
+                # temp_iqr: Interquartile range (p75-p25). Measures the spread of the central 50% of temperatures.
+                features['temp_iqr'] = features.get('temp_p75', np.nan) - features.get('temp_p25', np.nan)
+
+            # --- NEW FEATURE BLOCK 4: INTEGRATED/CUMULATIVE DYNAMIC FEATURES (as discussed) ---
+            
+            # Your Idea 1: Cumulative Raw Delta Sum
+            if 'cumulative_raw_delta_sum' in features:
+                # Sum of (T_t - T_1) over all frames for each pixel, then summed over all pixels.
+                # Captures net cumulative change. Can be close to zero if temp returns to start.
+                pixel_baselines = masked_pixels[:, 0].reshape(-1, 1) # Get T_1 for each pixel
+                pixel_deltas = masked_pixels - pixel_baselines # Subtract T_1 from all frames
+                features['cumulative_raw_delta_sum'] = np.sum(pixel_deltas)
+
+            # Your Idea 2: Cumulative Absolute Delta Sum
+            if 'cumulative_abs_delta_sum' in features:
+                # Sum of |T_t - T_1| over all frames for each pixel, then summed over all pixels.
+                # Captures total thermal "journey" away from the starting state. Robust to temp oscillations.
+                pixel_baselines = masked_pixels[:, 0].reshape(-1, 1)
+                pixel_deltas_abs = np.abs(masked_pixels - pixel_baselines)
+                features['cumulative_abs_delta_sum'] = np.sum(pixel_deltas_abs)
+                
+            # Suggested Feature 1: Area Under the Curve (AUC) of Mean Temperature Delta
+            if 'auc_mean_temp_delta' in features:
+                # Integrated change of the hotspot's average temperature over time.
+                # Robust to pixel noise. Captures both magnitude and duration of change.
+                delta_series = mean_series - mean_series[0]
+                auc = np.trapz(np.abs(delta_series), time_vector)
+                features['auc_mean_temp_delta'] = auc
+                
+            # Suggested Feature 2: Mean Pixel Volatility
+            if 'mean_pixel_volatility' in features:
+                # Measures the total frame-to-frame fluctuation for each pixel, averaged over the hotspot.
+                # High values indicate a "flickering" or unstable hotspot. Not biased by a noisy first frame.
+                frame_to_frame_diffs = np.diff(masked_pixels, axis=1)
+                pixel_volatilities = np.sum(np.abs(frame_to_frame_diffs), axis=1)
+                features['mean_pixel_volatility'] = np.nanmean(pixel_volatilities)
 
     # --- 3. Full Duration Features ---
     try:
@@ -176,24 +264,18 @@ def calculate_features_from_video(mat_filepath, mask_paths):
     """
     High-level wrapper to load a video and masks, combine them, and extract all features
     defined in the config file.
-
-    Args:
-        mat_filepath (str): Path to the .mat video file.
-        mask_paths (list): A list of paths to the .npy mask files.
-
-    Returns:
-        dict: A dictionary of calculated features.
     """
     try:
         mat_data = scipy.io.loadmat(mat_filepath)
         frames = mat_data.get('TempFrames').astype(np.float64)
     except Exception as e:
         print(f"Error loading frames from {mat_filepath}: {e}")
-        return {name: np.nan for name in cfg.HANDCRAFTED_FEATURES_TO_EXTRACT}
+        return {name: np.nan for name in cfg.ALL_POSSIBLE_FEATURES}
 
     if not mask_paths:
         print("Error: No mask paths provided.")
-        return {name: np.nan for name in cfg.HANDCRAFTED_FEATURES_TO_EXTRACT}
+        return {name: np.nan for name in cfg.ALL_POSSIBLE_FEATURES}
+
 
     combined_mask = np.zeros(frames.shape[:2], dtype=bool)
     for mask_path in mask_paths:
@@ -206,7 +288,6 @@ def calculate_features_from_video(mat_filepath, mask_paths):
 
     if not np.any(combined_mask):
         print("Warning: Combined mask is empty.")
-        return {name: np.nan for name in cfg.HANDCRAFTED_FEATURES_TO_EXTRACT}
+        return {name: np.nan for name in cfg.ALL_POSSIBLE_FEATURES}
 
-    # The envir_para is typically -1 for cooling (leaks)
     return calculate_hotspot_features(frames=frames, hotspot_mask=combined_mask, envir_para=1)
