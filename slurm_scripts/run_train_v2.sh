@@ -3,16 +3,17 @@
 #==============================================================================
 # SBATCH Directives for V2 Model Training
 #==============================================================================
-#SBATCH --account=soc-gpu-kp
-#SBATCH --partition=soc-gpu-kp
-#SBATCH --job-name=airflow-v2-train
-#SBATCH --output=logs/v2_training_%j.out
-#SBATCH --time=04:00:00  # Adjust as needed
+#SBATCH --account=yqu-gpu-np
+#SBATCH --partition=yqu-gpu-np
+#SBATCH --nodelist=notch448           # dedicated owner GPU node
+#SBATCH --job-name=airflow-v2-tune
+#SBATCH --output=logs/v2_training-%j.out
+#SBATCH --time=2-00:00:00             # 2 days (max wall time)
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
-#SBATCH --mem=16G
+#SBATCH --mem=32G
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=u1527145@utah.edu
 

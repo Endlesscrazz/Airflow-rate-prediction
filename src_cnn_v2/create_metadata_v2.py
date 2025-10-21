@@ -41,6 +41,8 @@ def main():
         try:
             video_id = row['video_id']
             hole_id = str(row['hole_id'])
+
+            numeric_hole_id = hole_id.split('_')[0]
             
             # --- Verify existence of raw files (using the robust logic) ---
             mat_filepath, mask_dir_path, found_config_key = (None, None, None)
@@ -66,28 +68,24 @@ def main():
                 print(f"\nWarning: Skipping sample '{video_id}_{hole_id}'. Reason: Mask directory not found.")
                 continue
 
-            # --- ROBUST MASK FILE FINDING LOGIC ---
+            # --- MASK FILE FINDING LOGIC ---
             # This logic handles multiple naming conventions.
             
             # Path 1: Exact match (e.g., hole_id '2' -> _mask_2.npy) - for multi-hole
-            path1 = os.path.join(mask_dir_path, f"{video_id}_mask_{hole_id}.npy")
-            
-            # Path 2: 0-indexed for hole_id '1' (e.g., hole_id '1' -> _mask_0.npy) - for single-hole
+            path1 = os.path.join(mask_dir_path, f"{video_id}_mask_{numeric_hole_id}.npy")
             path2 = os.path.join(mask_dir_path, f"{video_id}_mask_0.npy")
 
             individual_mask_path = None
             if os.path.exists(path1):
                 individual_mask_path = path1
-            elif hole_id == '1' and os.path.exists(path2):
+            elif numeric_hole_id == '1' and os.path.exists(path2):
                 individual_mask_path = path2
             
             if not individual_mask_path:
-                # If neither path was found, print a detailed warning and skip.
                 print(f"\nWarning: Skipping sample '{video_id}_{hole_id}'. Reason: Mask file not found.")
-                print(f"  - Tried path 1: {path1}")
-                if hole_id == '1': print(f"  - Tried path 2: {path2}")
+                print(f"  - Tried path 1 (using ID '{numeric_hole_id}'): {path1}")
+                if numeric_hole_id == '1': print(f"  - Tried path 2 (using ID '0'): {path2}")
                 continue
-            # --- END OF ROBUST LOGIC ---
 
             # If all files exist, add the sample to our list
             sample_data = row.to_dict()

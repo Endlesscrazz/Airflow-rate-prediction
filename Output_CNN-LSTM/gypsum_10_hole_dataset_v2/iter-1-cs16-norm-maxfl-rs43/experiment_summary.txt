@@ -1,0 +1,108 @@
+--- DATA SPLITTING DETAILS ---
+Timestamp: 2025-10-21 13:08:32
+
+Splitting Strategy: StratifiedGroupKFold
+Random Seed: 43
+Number of Folds (for dev/test split): 5
+Number of Folds (for train/val split): 5
+Stratification Bins (qcut): 5
+Original Dataset Stats:
+{
+    "Total Samples": 360,
+    "Unique Videos (Groups)": 45,
+    "Airflow Rate Distribution": {
+        "count": 360.0,
+        "mean": 1.90965125,
+        "std": 1.0465028116322208,
+        "min": 0.3466,
+        "25%": 1.1197,
+        "50%": 1.70635,
+        "75%": 2.60896,
+        "max": 4.50878
+    }
+}
+
+Split Counts:
+{
+    "Training Set": {
+        "Samples": 232,
+        "Proportion": "64.44%",
+        "Unique Videos": 29
+    },
+    "Validation Set": {
+        "Samples": 56,
+        "Proportion": "15.56%",
+        "Unique Videos": 7
+    },
+    "Test Set": {
+        "Samples": 72,
+        "Proportion": "20.00%",
+        "Unique Videos": 9
+    }
+}
+
+
+==================================================
+
+--- DATA CREATION PARAMETERS ---
+Timestamp: 2025-10-21 13:14:51
+
+Experiment Name: gypsum_10_hole_dataset_v2
+Source Ground Truth CSV: airflow_ground_truth_gypsum_10_hole.csv
+V2 Dataset Parameters:
+{
+    "OUTPUT_SUBDIR": "dataset_cs16_aug100",
+    "CROP_SIZE": 16,
+    "NUM_AUGMENTATIONS": 100,
+    "ENABLE_GEOMETRIC_AUGMENTATION": true,
+    "AUGMENTATION_PARAMS": {
+        "NOISE_LEVEL": 0.05,
+        "ROTATION_DEGREES": 10,
+        "TRANSLATION_FRAC": 0.1
+    }
+}
+
+Frames Per Sample: 25
+Focus Duration (seconds): 15
+Final Train Samples (with augmentations): 46632
+Final Validation Samples: 56
+Final Test Samples: 72
+Original Train Samples: 232
+Original Validation Samples: 56
+Original Test Samples: 72
+
+==================================================
+
+--- FINAL MODEL TRAINING PARAMETERS ---
+Timestamp: 2025-10-21 13:33:29
+
+Experiment Name: gypsum_10_hole_dataset_v2
+Batch Size: 64
+Number of Epochs Run: 30
+Best Model Found at Epoch: 5
+Best Validation MAE: 0.15956075489521027
+Final Hyperparameters Used:
+{
+    "lr": 0.00012578935386695162,
+    "weight_decay": 3.3668458829765327e-06,
+    "dropout_rate": 0.3221973421324753,
+    "lstm_hidden_size": 256,
+    "lstm_layers": 2,
+    "optimizer": "Adam"
+}
+
+
+==================================================
+
+--- FINAL TEST SET PERFORMANCE ---
+Timestamp: 2025-10-21 13:41:02
+
+R-squared (R²): 0.7406764059259388
+Mean Absolute Error (MAE): 0.3154984337268935
+Root Mean Squared Error (RMSE): 0.49699571067787796
+Mean Absolute Percentage Error (MAPE): 15.049710602189899
+Accuracy @ 10%: 43.05555555555556
+Accuracy @ 25%: 79.16666666666666
+
+==================================================
+

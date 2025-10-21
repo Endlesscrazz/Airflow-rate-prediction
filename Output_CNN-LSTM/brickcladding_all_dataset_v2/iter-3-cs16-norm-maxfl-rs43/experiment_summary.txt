@@ -1,0 +1,108 @@
+--- DATA SPLITTING DETAILS ---
+Timestamp: 2025-10-21 12:48:17
+
+Splitting Strategy: StratifiedGroupKFold
+Random Seed: 43
+Number of Folds (for dev/test split): 5
+Number of Folds (for train/val split): 5
+Stratification Bins (qcut): 5
+Original Dataset Stats:
+{
+    "Total Samples": 84,
+    "Unique Videos (Groups)": 42,
+    "Airflow Rate Distribution": {
+        "count": 84.0,
+        "mean": 0.601047738095238,
+        "std": 0.45010149501562874,
+        "min": 0.04612,
+        "25%": 0.20677,
+        "50%": 0.47491,
+        "75%": 0.87444,
+        "max": 1.5686
+    }
+}
+
+Split Counts:
+{
+    "Training Set": {
+        "Samples": 52,
+        "Proportion": "61.90%",
+        "Unique Videos": 26
+    },
+    "Validation Set": {
+        "Samples": 14,
+        "Proportion": "16.67%",
+        "Unique Videos": 7
+    },
+    "Test Set": {
+        "Samples": 18,
+        "Proportion": "21.43%",
+        "Unique Videos": 9
+    }
+}
+
+
+==================================================
+
+--- DATA CREATION PARAMETERS ---
+Timestamp: 2025-10-21 12:48:54
+
+Experiment Name: brickcladding_all_dataset_v2
+Source Ground Truth CSV: airflow_ground_truth_brickcladding_all.csv
+V2 Dataset Parameters:
+{
+    "OUTPUT_SUBDIR": "dataset_cs16_aug100",
+    "CROP_SIZE": 16,
+    "NUM_AUGMENTATIONS": 100,
+    "ENABLE_GEOMETRIC_AUGMENTATION": true,
+    "AUGMENTATION_PARAMS": {
+        "NOISE_LEVEL": 0.05,
+        "ROTATION_DEGREES": 10,
+        "TRANSLATION_FRAC": 0.1
+    }
+}
+
+Frames Per Sample: 25
+Focus Duration (seconds): 15
+Final Train Samples (with augmentations): 10452
+Final Validation Samples: 14
+Final Test Samples: 18
+Original Train Samples: 52
+Original Validation Samples: 14
+Original Test Samples: 18
+
+==================================================
+
+--- FINAL MODEL TRAINING PARAMETERS ---
+Timestamp: 2025-10-21 12:54:13
+
+Experiment Name: brickcladding_all_dataset_v2
+Batch Size: 64
+Number of Epochs Run: 34
+Best Model Found at Epoch: 9
+Best Validation MAE: 0.10027823597192764
+Final Hyperparameters Used:
+{
+    "lr": 0.00012578935386695162,
+    "weight_decay": 3.3668458829765327e-06,
+    "dropout_rate": 0.3221973421324753,
+    "lstm_hidden_size": 256,
+    "lstm_layers": 2,
+    "optimizer": "Adam"
+}
+
+
+==================================================
+
+--- FINAL TEST SET PERFORMANCE ---
+Timestamp: 2025-10-21 12:57:37
+
+R-squared (R²): 0.9190086061392692
+Mean Absolute Error (MAE): 0.10443702311356862
+Root Mean Squared Error (RMSE): 0.13346515933854422
+Mean Absolute Percentage Error (MAPE): 42.90689856895383
+Accuracy @ 10%: 33.33333333333333
+Accuracy @ 25%: 61.111111111111114
+
+==================================================
+

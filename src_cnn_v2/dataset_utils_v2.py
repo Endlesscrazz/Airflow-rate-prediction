@@ -6,6 +6,8 @@ import os
 import torch
 import pandas as pd
 import numpy as np
+
+from src_cnn_v2 import config_v2 as cfg
 from torch.utils.data import Dataset
 
 class CroppedSequenceDataset(Dataset):
@@ -53,6 +55,9 @@ class CroppedSequenceDataset(Dataset):
         delta_t_tensor = torch.tensor(sample_row['delta_T'], dtype=torch.float32)
 
         # 7. Load the target variable (airflow_rate)
-        target_tensor = torch.tensor(sample_row['airflow_rate'], dtype=torch.float32)
+        target_tensor = torch.tensor(
+            sample_row['airflow_rate'] / cfg.MAX_FLOW_RATE, 
+            dtype=torch.float32
+        )
         
         return image_sequence_tensor, delta_t_tensor, target_tensor

@@ -1,10 +1,9 @@
 # scripts/debug_SAM_local_peaks.py
 """
-UNIVERSAL & FLEXIBLE DEBUG SCRIPT (v9 - Refactored)
-- Merged peak-finding logic into a single, flexible find_prompts_by_local_peaks function.
-- The function now uses a `return_all` flag to either return the top N prompts (standard mode)
-  or all found peaks (for multi-hole filtering).
-- Maintains backward compatibility and reduces code duplication.
+UNIVERSAL & FLEXIBLE DEBUG SCRIPT (v10 - With Coordinate-based Assignment)
+- Includes a 'two_hole_assign' mode for robustly assigning hole IDs based on proximity to known coordinates.
+- Adds a dedicated verification plot to visually confirm the assignment of detected peaks to target locations.
+- Retains all previous functionality including 'standard' mode and the 6-panel presentation visual.
 """
 
 import os
@@ -15,6 +14,7 @@ import scipy.io
 import cv2
 import torch
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 from scipy.stats import kendalltau, mstats
 from tqdm import tqdm
 from joblib import Parallel, delayed
@@ -25,27 +25,36 @@ try:
     from skimage.feature import peak_local_max
 except ImportError:
     print("Error: Required libraries not found. Please run:", file=sys.stderr)
-    print("pip install scikit-image segment-anything-py imageio", file=sys.stderr)
+    print("pip install scikit-image segment-anything-py imageio matplotlib", file=sys.stderr)
     sys.exit(1)
 
 # ========================================================================================
-# --- Coordinates for Multi-Hole Filtering & Assignment ---
+# --- COORDINATES FOR HOLE ASSIGNMENT ---
 # ========================================================================================
 # Coordinates are (row, col) which corresponds to (y, x)
+
+# For 10-hole Gypsum dataset
 SLIT_COORDS = {
     'Hole_1': np.array([233, 553]),
     'Hole_10': np.array([414, 353]),
 }
-
 TARGET_HOLE_COORDS = {
-    2: np.array([79, 507]),
-    3: np.array([53, 344]),
-    4: np.array([78, 181]),
-    5: np.array([213, 219]),
-    6: np.array([332, 149]),
-    7: np.array([326, 307]),
-    8: np.array([325, 453]),
-    9: np.array([201, 355]),
+    2: np.array([79, 507]), 3: np.array([53, 344]), 4: np.array([78, 181]),
+    5: np.array([213, 219]), 6: np.array([332, 149]), 7: np.array([326, 307]),
+    8: np.array([325, 453]), 9: np.array([201, 355]),
+}
+
+# --- For 2-hole datasets ---
+# ACTION: Verify and update these approximate (y, x) coordinates for your datasets.
+TWO_HOLE_COORDS = {
+    'hardyboard': { # 08132025
+        1: np.array([322, 328]),  # Approx. center of "center hole"
+        2: np.array([131, 497]),  # Approx. center of "right corner hole"
+    },
+    # 'brickcladding': { # Note: removed space for easier matching
+    #     1: np.array([272, 328]),  # Approx. center of "center hole"
+    #     2: np.array([360, 140]),  # Approx. center of "corner hole"
+    # }
 }
 
 # ========================================================================================
@@ -131,108 +140,84 @@ def create_panel_roi_mask(median_frame, erosion_iterations):
         panel_mask = cv2.erode(panel_mask, kernel, iterations=erosion_iterations)
     return panel_mask
 
-def find_prompts_by_quantile(activity_map, num_prompts, quantile_thresh):
-    print(f"  - Step 5: Finding prompts via global quantile (threshold: {quantile_thresh:.3f})...")
-    if activity_map is None or not np.any(activity_map > 1e-9): return [], []
-    active_pixels = activity_map[activity_map > 1e-9]
-    if active_pixels.size == 0: return [], []
-    activity_threshold = np.quantile(active_pixels, quantile_thresh)
-    binary_mask = (activity_map >= activity_threshold).astype(np.uint8)
-    kernel = np.ones((3,3), np.uint8); binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
-    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary_mask, connectivity=8)
-    if num_labels <= 1: return [], []
-    all_candidates = []
-    for i in range(1, num_labels):
-        component_mask = (labels == i)
-        peak_activity_value = np.max(activity_map[component_mask])
-        all_candidates.append({'centroid': centroids[i], 'stat': stats[i], 'peak_activity': peak_activity_value})
-    sorted_by_intensity = sorted(all_candidates, key=lambda x: x['peak_activity'], reverse=True)
-    top_candidates = sorted_by_intensity[:num_prompts]
-    return top_candidates, all_candidates
-
 def find_prompts_by_local_peaks(activity_map, num_prompts, min_distance, abs_threshold, prompt_box_size, return_all=False):
-    """
-    Finds prompts using local peak detection.
-    - If return_all=False, returns the top N candidates with bounding boxes.
-    - If return_all=True, returns all found candidates without bounding boxes.
-    """
     print(f"  - Step 5: Finding local peaks (min_dist: {min_distance}, threshold: {abs_threshold})...")
     coordinates = peak_local_max(activity_map, min_distance=min_distance, threshold_abs=abs_threshold)
     if coordinates.size == 0: 
         return [], []
 
-    all_candidates = []
-    for r, c in coordinates:
-        all_candidates.append({'centroid': np.array([c, r]), 'peak_activity': activity_map[r, c]})
-    
+    all_candidates = [{'centroid': np.array([c, r]), 'peak_activity': activity_map[r, c]} for r, c in coordinates]
     sorted_candidates = sorted(all_candidates, key=lambda x: x['peak_activity'], reverse=True)
 
     if return_all:
         print(f"    - Found {len(sorted_candidates)} total peaks (return_all=True).")
         return sorted_candidates, sorted_candidates
 
-    # --- Standard Mode Logic ---
     top_candidates = sorted_candidates[:num_prompts]
     print(f"    - Found {len(sorted_candidates)} total peaks, selecting top {len(top_candidates)}.")
-
-    H, W = activity_map.shape
-    for cand in top_candidates:
-        center_x, center_y = cand['centroid']
-        box_half = prompt_box_size // 2
-        x1 = int(np.clip(center_x - box_half, 0, W-1))
-        y1 = int(np.clip(center_y - box_half, 0, H-1))
-        w = int(np.clip(center_x + box_half, 0, W-1)) - x1
-        h = int(np.clip(center_y + box_half, 0, H-1)) - y1
-        cand['stat'] = [x1, y1, w, h]
-        
     return top_candidates, sorted_candidates
 
-def filter_and_assign_prompts(all_candidates, slit_coords, target_hole_coords, exclusion_radius=30):
+def filter_and_assign_prompts(all_candidates, slit_coords_to_filter, target_hole_coords, exclusion_radius=30):
     print(f"  - Step 5b: Filtering and assigning prompts...")
     filtered_prompts = []
-    slit_locations = np.array([coord[::-1] for coord in slit_coords.values()]) # Convert to (x, y)
-    
-    for cand in all_candidates:
-        cand_coord = cand['centroid'].reshape(1, 2)
-        distances = cdist(cand_coord, slit_locations)
-        if np.all(distances > exclusion_radius):
-            filtered_prompts.append(cand)
+    if slit_coords_to_filter:
+        slit_locations = np.array([coord[::-1] for coord in slit_coords_to_filter.values()])
+        for cand in all_candidates:
+            if np.all(cdist(cand['centroid'].reshape(1, 2), slit_locations) > exclusion_radius):
+                filtered_prompts.append(cand)
+    else:
+        filtered_prompts = all_candidates
             
-    print(f"    - Found {len(all_candidates)} total peaks, {len(filtered_prompts)} remaining after filtering slits.")
-
-    if not filtered_prompts:
-        return []
+    print(f"    - Found {len(all_candidates)} total peaks, {len(filtered_prompts)} remaining after filtering.")
+    if not filtered_prompts: return []
 
     assigned_prompts = {}
     remaining_prompts = list(filtered_prompts)
-    
     for hole_id, target_coord in target_hole_coords.items():
-        target_xy = target_coord[::-1] # Convert to (x, y)
         if not remaining_prompts: break
-        
-        distances = [np.linalg.norm(p['centroid'] - target_xy) for p in remaining_prompts]
-        closest_prompt_idx = np.argmin(distances)
-        
+        target_xy = target_coord[::-1]
+        distances_to_target = [np.linalg.norm(p['centroid'] - target_xy) for p in remaining_prompts]
+        closest_prompt_idx = np.argmin(distances_to_target)
         closest_prompt = remaining_prompts.pop(closest_prompt_idx)
         closest_prompt['hole_id'] = hole_id
         assigned_prompts[hole_id] = closest_prompt
 
     final_prompts = [assigned_prompts[key] for key in sorted(assigned_prompts.keys())]
     print(f"    - Successfully assigned {len(final_prompts)} prompts to target holes.")
-    
     return final_prompts
+
+def create_assignment_visual(activity_map, all_candidates, final_prompts, target_coords, save_path):
+    print("\n--- Creating Assignment Verification Visual ---")
+    plt.figure(figsize=(12, 12))
+    plt.imshow(activity_map, cmap='hot')
+    if all_candidates:
+        all_coords = np.array([p['centroid'] for p in all_candidates])
+        plt.scatter(all_coords[:, 0], all_coords[:, 1], s=100, facecolors='none', edgecolors='cyan', lw=1.5, label='All Found Peaks')
+    target_x = [c[1] for c in target_coords.values()]
+    target_y = [c[0] for c in target_coords.values()]
+    plt.scatter(target_x, target_y, s=300, c='red', marker='+', lw=2, label='Target Locations')
+    if final_prompts:
+        for prompt in final_prompts:
+            hole_id, prompt_coord = prompt['hole_id'], prompt['centroid']
+            target_coord_xy = target_coords[hole_id][::-1]
+            plt.plot([target_coord_xy[0], prompt_coord[0]], [target_coord_xy[1], prompt_coord[1]], 'w--', lw=1.5)
+            plt.scatter(prompt_coord[0], prompt_coord[1], s=600, c='yellow', marker='*', edgecolor='black', zorder=5)
+            plt.text(prompt_coord[0] + 10, prompt_coord[1] - 10, f"Hole {hole_id}", color='white', fontsize=12, fontweight='bold')
+    plt.title('Debug Map: Prompts Assigned & Labeled', fontsize=16)
+    plt.legend()
+    plt.savefig(save_path)
+    plt.close()
+    print(f"  - Saved assignment verification to: {save_path}")
 
 def run_sam_with_box_and_point_prompts(frame_rgb, top_candidates, predictor, prompt_box_size):
     all_final_masks = []; predictor.set_image(frame_rgb)
     H, W, _ = frame_rgb.shape
-    
     for cand in top_candidates:
         center_x, center_y = cand['centroid']; box_half = prompt_box_size // 2
-        x1 = int(np.clip(center_x - box_half, 0, W-1)); y1 = int(np.clip(center_y - box_half, 0, H-1))
-        x2 = int(np.clip(center_x + box_half, 0, W-1)); y2 = int(np.clip(center_y + box_half, 0, H-1))
+        x1, y1 = int(np.clip(center_x - box_half, 0, W-1)), int(np.clip(center_y - box_half, 0, H-1))
+        x2, y2 = int(np.clip(center_x + box_half, 0, W-1)), int(np.clip(center_y + box_half, 0, H-1))
         input_box = np.array([x1, y1, x2, y2])
-        
-        point_coords = cand['centroid'].reshape(1, 2); point_labels = np.array([1])
+        point_coords, point_labels = cand['centroid'].reshape(1, 2), np.array([1])
         masks, _, _ = predictor.predict(point_coords=point_coords, point_labels=point_labels, box=input_box[None, :], multimask_output=False)
         if len(masks) > 0: all_final_masks.append(masks[0])
     return all_final_masks
@@ -246,11 +231,7 @@ def create_presentation_visual(artifacts, save_path):
     print("\n--- Creating Presentation Visual Storyboard ---")
     fig, axes = plt.subplots(2, 3, figsize=(24, 14))
     fig.suptitle("Automated Segmentation Pipeline", fontsize=24, y=0.97)
-    
-    titles = [
-        "1. Raw Input (Enhanced)", "2. Pre-processed Data (Smoothed)", "3. Activity Map (Kendall Tau)",
-        "4. ROI Mask Applied", "5. Prompts Assigned & Labeled", "6. Final Segmentation"
-    ]
+    titles = ["1. Raw Input (Enhanced)", "2. Pre-processed Data (Smoothed)", "3. Activity Map", "4. ROI Mask Applied", "5. Prompts Assigned & Labeled", "6. Final Segmentation"]
     
     axes[0, 0].imshow(artifacts['enhanced_frame'], cmap='gray')
     axes[0, 1].imshow(artifacts['smoothed_frame'], cmap='gray')
@@ -259,31 +240,22 @@ def create_presentation_visual(artifacts, save_path):
     
     ax = axes[1, 1]
     ax.imshow(artifacts['masked_activity_map'], cmap='hot')
-    if artifacts['all_candidates']:
+    if artifacts.get('all_candidates'):
         ax.scatter([c['centroid'][0] for c in artifacts['all_candidates']], [c['centroid'][1] for c in artifacts['all_candidates']], s=150, facecolors='none', edgecolors='cyan', lw=1.5, label='All Found Peaks')
-    if artifacts['final_prompts']:
+    if artifacts.get('final_prompts'):
         prompts = artifacts['final_prompts']
         ax.scatter([p['centroid'][0] for p in prompts], [p['centroid'][1] for p in prompts], s=600, c='yellow', marker='*', edgecolor='black', zorder=5, label='Assigned Prompts')
         for p in prompts:
-            # Check if hole_id exists before trying to display it
             if 'hole_id' in p:
                 ax.text(p['centroid'][0] + 15, p['centroid'][1] + 15, str(p['hole_id']), color='white', fontsize=16, fontweight='bold')
     ax.legend()
 
-    ax = axes[1, 2]
-    ax.imshow(cv2.cvtColor(artifacts['segmentation_image'], cv2.COLOR_BGR2RGB))
-    if artifacts['final_prompts']:
-        for p in artifacts['final_prompts']:
-            if 'hole_id' in p:
-                ax.text(p['centroid'][0] - 10, p['centroid'][1] + 10, str(p['hole_id']), color='white', fontsize=18, fontweight='bold', bbox=dict(facecolor='black', alpha=0.5, pad=2))
+    axes[1, 2].imshow(cv2.cvtColor(artifacts['segmentation_image'], cv2.COLOR_BGR2RGB))
             
     for i, ax in enumerate(axes.flat):
-        ax.set_title(titles[i], fontsize=16)
-        ax.axis('off')
+        ax.set_title(titles[i], fontsize=16); ax.axis('off')
         
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
-    plt.savefig(save_path)
-    plt.close()
+    plt.tight_layout(rect=[0, 0, 1, 0.95]); plt.savefig(save_path); plt.close()
     print(f"  - Saved presentation visual to: {save_path}")
 
 # ========================================================================================
@@ -297,72 +269,71 @@ def main(args):
     frames = scipy.io.loadmat(args.input)['TempFrames'].astype(np.float64); H, W, T = frames.shape
     
     artifacts = {}
-    artifacts['enhanced_frame'] = enhance_frame(frames[:, :, 0])
     
     spatially_filtered_frames = apply_spatial_filter(frames, args.spatial_filter)
     temporally_smoothed_frames = apply_temporal_smoothing(spatially_filtered_frames, args.temporal_smooth_window)
-    artifacts['smoothed_frame'] = enhance_frame(temporally_smoothed_frames[:, :, 0])
-    
     activity_map = generate_activity_map(temporally_smoothed_frames, args.activity_method, args.env_para)
-    artifacts['activity_map'] = activity_map
-    
     target_frame = np.median(frames, axis=2)
     if args.roi_method == 'border': roi_mask = create_border_roi_mask((H, W), args.roi_border_percent)
     else: roi_mask = create_panel_roi_mask(target_frame, args.roi_erosion)
-    
     masked_activity_map = activity_map * roi_mask
-    artifacts['masked_activity_map'] = masked_activity_map
     
-    # --- PROMPT LOGIC WITH MODE SWITCH ---
+    artifacts.update({
+        'enhanced_frame': enhance_frame(frames[:, :, T // 2]),
+        'smoothed_frame': enhance_frame(temporally_smoothed_frames[:, :, T // 2]),
+        'activity_map': activity_map,
+        'masked_activity_map': masked_activity_map
+    })
+    
+    _, all_candidates = find_prompts_by_local_peaks(masked_activity_map, 20, args.peak_min_distance, args.peak_abs_threshold, args.prompt_box_size, return_all=True)
+    artifacts['all_candidates'] = all_candidates
+    
+    final_prompts, target_coords_for_visual = [], None
+
     if args.processing_mode == 'multi_hole_filter':
         print("\nRunning in 'multi_hole_filter' mode.")
-        _, all_candidates = find_prompts_by_local_peaks(
-            masked_activity_map, num_prompts=20, min_distance=args.peak_min_distance, 
-            abs_threshold=args.peak_abs_threshold, prompt_box_size=args.prompt_box_size, return_all=True
-        )
-        artifacts['all_candidates'] = all_candidates
-
         final_prompts = filter_and_assign_prompts(all_candidates, SLIT_COORDS, TARGET_HOLE_COORDS)
-        artifacts['final_prompts'] = final_prompts
-    else: # Standard mode
-        print("\nRunning in 'standard' mode.")
-        if args.prompt_method == 'quantile':
-            final_prompts, all_candidates = find_prompts_by_quantile(
-                masked_activity_map, args.num_leaks, args.activity_quantile
-            )
-        else: # local_peak
-            final_prompts, all_candidates = find_prompts_by_local_peaks(
-                masked_activity_map, args.num_leaks, args.peak_min_distance, 
-                args.peak_abs_threshold, args.prompt_box_size
-            )
-        artifacts['all_candidates'] = all_candidates
-        artifacts['final_prompts'] = final_prompts
-    # --- END LOGIC ---
+        target_coords_for_visual = TARGET_HOLE_COORDS
 
-    if not final_prompts: print("Could not find any significant prompts. Exiting.", file=sys.stderr); return
+    elif args.processing_mode == 'two_hole_assign':
+        print("\nRunning in 'two_hole_assign' mode.")
+        material_coords, input_path_lower = None, args.input.lower().replace("_", "").replace("-", "")
+        for material, coords in TWO_HOLE_COORDS.items():
+            if material in input_path_lower:
+                material_coords, target_coords_for_visual = coords, coords
+                print(f"  - Using '{material}' coordinates for assignment.")
+                break
+        if not material_coords:
+            print("Could not determine material for 'two_hole_assign' mode. Exiting.", file=sys.stderr); return
+        final_prompts = filter_and_assign_prompts(all_candidates, {}, material_coords)
+
+    else: # standard mode
+        print("\nRunning in 'standard' mode (intensity-based).")
+        final_prompts = all_candidates[:args.num_leaks]
+        for i, p in enumerate(final_prompts): p['hole_id'] = i + 1
+    
+    artifacts['final_prompts'] = final_prompts
+
+    if target_coords_for_visual:
+        verification_path = os.path.join(args.output_dir, f"{os.path.splitext(os.path.basename(args.input))[0]}_prompt_assignment.png")
+        create_assignment_visual(masked_activity_map, all_candidates, final_prompts, target_coords_for_visual, verification_path)
+
+    if not final_prompts: print("Could not find/assign prompts. Exiting.", file=sys.stderr); return
 
     print("\nRunning SAM segmentation...")
-    frame_normalized_8bit = cv2.normalize(target_frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    frame_rgb = cv2.cvtColor(frame_normalized_8bit, cv2.COLOR_GRAY2BGR)
-    
+    frame_rgb = cv2.cvtColor(cv2.normalize(target_frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U), cv2.COLOR_GRAY2BGR)
     all_final_masks = run_sam_with_box_and_point_prompts(frame_rgb, final_prompts, predictor, args.prompt_box_size)
-
-    if not all_final_masks: print("SAM did not generate masks. Exiting.", file=sys.stderr); return
+    if not all_final_masks: print("SAM generated no masks. Exiting.", file=sys.stderr); return
 
     print("\nSaving final outputs...")
     segmentation_image = frame_rgb.copy(); colors = [[255, 255, 0], [0, 255, 255], [255, 0, 255], [255, 0, 0], [0, 255, 0], [0, 0, 255], [128, 0, 128], [0, 128, 128]]
-    
-    for i, prompt_data in enumerate(final_prompts):
-        mask = all_final_masks[i]
-        hole_id = prompt_data.get('hole_id', i)
-        
-        color = colors[i % len(colors)]; color_overlay = np.zeros_like(segmentation_image); color_overlay[mask] = color
+    for i, mask in enumerate(all_final_masks):
+        hole_id = final_prompts[i].get('hole_id')
+        np.save(os.path.join(args.output_dir, f"{os.path.splitext(os.path.basename(args.input))[0]}_mask_{hole_id}.npy"), mask)
+        color_overlay = np.zeros_like(segmentation_image); color_overlay[mask] = colors[i % len(colors)]
         segmentation_image = cv2.addWeighted(segmentation_image, 1, color_overlay, 0.6, 0)
-        
-        mask_save_path = os.path.join(args.output_dir, f"{os.path.splitext(os.path.basename(args.input))[0]}_mask_{hole_id}.npy")
-        np.save(mask_save_path, mask)
     
-    print(f"  - Saved {len(all_final_masks)} masks.")
+    print(f"  - Saved {len(all_final_masks)} masks with assigned hole IDs.")
     artifacts['segmentation_image'] = segmentation_image
 
     if args.create_presentation_visual:
@@ -371,17 +342,14 @@ def main(args):
     
     print("\n--- Script finished. ---")
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Universal script for hotspot segmentation.")
-    
     parser.add_argument("--input", required=True, type=str)
     parser.add_argument("--checkpoint", required=True, type=str)
     parser.add_argument("--model_type", type=str, default="vit_b")
     parser.add_argument("--output_dir", required=True, type=str)
     
-    parser.add_argument("--processing_mode", type=str, default="standard", choices=['standard', 'multi_hole_filter'],
-                        help="Processing mode: 'standard' for 1-2 holes, 'multi_hole_filter' for 10-hole dataset.")
+    parser.add_argument("--processing_mode", type=str, default="standard", choices=['standard', 'two_hole_assign', 'multi_hole_filter'])
 
     param_group = parser.add_argument_group('Pipeline Control Parameters')
     param_group.add_argument("--num_leaks", type=int, default=1, help="Number of leaks to find in 'standard' mode.")
@@ -394,30 +362,25 @@ if __name__ == "__main__":
     param_group.add_argument("--roi_erosion", type=int, default=3)
 
     prompt_group = parser.add_argument_group('Prompt Finding Method')
-    prompt_group.add_argument("--prompt_method", type=str, default="local_peak", choices=['quantile', 'local_peak'])
-    prompt_group.add_argument("--activity_quantile", type=float, default=0.995)
     prompt_group.add_argument("--peak_min_distance", type=int, default=50)
     prompt_group.add_argument("--peak_abs_threshold", type=float, default=0.2)
     prompt_group.add_argument("--prompt_box_size", type=int, default=30)
     
-    parser.add_argument("--create_presentation_visual", action='store_true', 
-                        help="If set, generates a 2x3 composite image visualizing the entire pipeline.")
+    parser.add_argument("--create_presentation_visual", action='store_true', help="Generates a 2x3 composite image visualizing the pipeline.")
 
     args = parser.parse_args()
     main(args)
-
 """
 python src_feature_based/debug-files/debug_SAM_local_peaks.py \
-  --input /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_Gypsum_09032025_10holes_noshutter/T5P_2025-10-7-11-38-40_35_23_12_.mat \
+  --input /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_08132025_2holes_noshutter/T1.4V_2025-08-14-15-47-12_21_34_13_.mat \
   --checkpoint SAM/sam_checkpoints/sam_vit_b_01ec64.pth \
-  --output_dir debug_ouputs/Fluke_Gypsum_09032025_10holes_noshutter/vid-1/iter-1-local-peak \
-  --num_leaks 10 \
+  --output_dir debug_ouputs/Fluke_HardyBoard_08132025_2holes_noshutter/vid-1/iter-1-local-peak \
+  --num_leaks 2 \
   --roi_method border \
   --roi_border_percent 0.10 \
-  --prompt_method local_peak \
   --peak_min_distance 50 \
   --create_presentation_visual \
   --peak_abs_threshold 0.2 \
-  --processing_mode multi_hole_filter
+  --processing_mode standard
   
 """

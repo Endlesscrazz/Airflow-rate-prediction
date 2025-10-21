@@ -1,0 +1,243 @@
+--- DATA SPLITTING DETAILS ---
+Timestamp: 2025-10-18 14:24:20
+
+Splitting Strategy: StratifiedGroupKFold
+Random Seed: 42
+Number of Folds (for dev/test split): 5
+Number of Folds (for train/val split): 5
+Stratification Bins (qcut): 5
+Original Dataset Stats:
+{
+    "Total Samples": 20,
+    "Unique Videos (Groups)": 20,
+    "Airflow Rate Distribution": {
+        "count": 20.0,
+        "mean": 0.8155000000000001,
+        "std": 0.17289561803828957,
+        "min": 0.645,
+        "25%": 0.67875,
+        "50%": 0.69,
+        "75%": 0.933,
+        "max": 1.07
+    }
+}
+
+Split Counts:
+{
+    "Training Set": {
+        "Samples": 13,
+        "Proportion": "65.00%",
+        "Unique Videos": 13
+    },
+    "Validation Set": {
+        "Samples": 3,
+        "Proportion": "15.00%",
+        "Unique Videos": 3
+    },
+    "Test Set": {
+        "Samples": 4,
+        "Proportion": "20.00%",
+        "Unique Videos": 4
+    }
+}
+
+
+==================================================
+
+--- DATA CREATION PARAMETERS ---
+Timestamp: 2025-10-18 14:25:08
+
+Experiment Name: hardyboard_all_dataset_v2
+Source Ground Truth CSV: airflow_ground_truth_hardyboard_all.csv
+V2 Dataset Parameters:
+{
+    "CROP_SIZE": 32,
+    "NUM_AUGMENTATIONS": 100,
+    "NOISE_LEVEL": 0.05,
+    "OUTPUT_SUBDIR": "dataset_1ch_cropped_augmented"
+}
+
+Frames Per Sample: 25
+Focus Duration (seconds): 15
+Final Train Samples (with augmentations): 1313
+Final Validation Samples: 3
+Final Test Samples: 4
+Original Train Samples: 13
+Original Validation Samples: 3
+Original Test Samples: 4
+
+==================================================
+
+--- DATA SPLITTING DETAILS ---
+Timestamp: 2025-10-18 14:39:24
+
+Splitting Strategy: StratifiedGroupKFold
+Random Seed: 42
+Number of Folds (for dev/test split): 5
+Number of Folds (for train/val split): 5
+Stratification Bins (qcut): 5
+Original Dataset Stats:
+{
+    "Total Samples": 108,
+    "Unique Videos (Groups)": 64,
+    "Airflow Rate Distribution": {
+        "count": 108.0,
+        "mean": 0.7354802777777776,
+        "std": 0.40400943593926064,
+        "min": 0.16867,
+        "25%": 0.43485,
+        "50%": 0.631335,
+        "75%": 1.00085,
+        "max": 1.58645
+    }
+}
+
+Split Counts:
+{
+    "Training Set": {
+        "Samples": 68,
+        "Proportion": "62.96%",
+        "Unique Videos": 41
+    },
+    "Validation Set": {
+        "Samples": 17,
+        "Proportion": "15.74%",
+        "Unique Videos": 10
+    },
+    "Test Set": {
+        "Samples": 23,
+        "Proportion": "21.30%",
+        "Unique Videos": 13
+    }
+}
+
+
+==================================================
+
+--- DATA CREATION PARAMETERS ---
+Timestamp: 2025-10-18 14:43:25
+
+Experiment Name: hardyboard_all_dataset_v2
+Source Ground Truth CSV: airflow_ground_truth_hardyboard_all.csv
+V2 Dataset Parameters:
+{
+    "CROP_SIZE": 32,
+    "NUM_AUGMENTATIONS": 100,
+    "NOISE_LEVEL": 0.05,
+    "OUTPUT_SUBDIR": "dataset_1ch_cropped_augmented"
+}
+
+Frames Per Sample: 25
+Focus Duration (seconds): 15
+Final Train Samples (with augmentations): 6868
+Final Validation Samples: 17
+Final Test Samples: 23
+Original Train Samples: 68
+Original Validation Samples: 17
+Original Test Samples: 23
+
+==================================================
+
+--- DATA SPLITTING DETAILS ---
+Timestamp: 2025-10-18 14:57:30
+
+Splitting Strategy: StratifiedGroupKFold
+Random Seed: 42
+Number of Folds (for dev/test split): 5
+Number of Folds (for train/val split): 5
+Stratification Bins (qcut): 5
+Original Dataset Stats:
+{
+    "Total Samples": 109,
+    "Unique Videos (Groups)": 65,
+    "Airflow Rate Distribution": {
+        "count": 109.0,
+        "mean": 0.7385492660550456,
+        "std": 0.4034091367074944,
+        "min": 0.16867,
+        "25%": 0.43485,
+        "50%": 0.645,
+        "75%": 1.00085,
+        "max": 1.58645
+    }
+}
+
+Split Counts:
+{
+    "Training Set": {
+        "Samples": 71,
+        "Proportion": "65.14%",
+        "Unique Videos": 42
+    },
+    "Validation Set": {
+        "Samples": 16,
+        "Proportion": "14.68%",
+        "Unique Videos": 10
+    },
+    "Test Set": {
+        "Samples": 22,
+        "Proportion": "20.18%",
+        "Unique Videos": 13
+    }
+}
+
+
+==================================================
+
+--- DATA CREATION PARAMETERS ---
+Timestamp: 2025-10-18 15:01:31
+
+Experiment Name: hardyboard_all_dataset_v2
+Source Ground Truth CSV: airflow_ground_truth_hardyboard_all.csv
+V2 Dataset Parameters:
+{
+    "CROP_SIZE": 32,
+    "NUM_AUGMENTATIONS": 100,
+    "NOISE_LEVEL": 0.05,
+    "OUTPUT_SUBDIR": "dataset_1ch_cropped_augmented"
+}
+
+Frames Per Sample: 25
+Focus Duration (seconds): 15
+Final Train Samples (with augmentations): 7171
+Final Validation Samples: 16
+Final Test Samples: 22
+Original Train Samples: 71
+Original Validation Samples: 16
+Original Test Samples: 22
+
+==================================================
+
+--- FINAL MODEL TRAINING PARAMETERS ---
+Timestamp: 2025-10-18 18:12:57
+
+Experiment Name: hardyboard_all_dataset_v2
+Batch Size: 16
+Number of Epochs Run: 62
+Best Model Found at Epoch: 37
+Best Validation MAE: 0.14532743394374847
+Final Hyperparameters Used:
+{
+    "lr": 9.6681665526918e-05,
+    "weight_decay": 1.0347688244846932e-06,
+    "dropout_rate": 0.2601194262689661,
+    "lstm_hidden_size": 64,
+    "lstm_layers": 3,
+    "optimizer": "Adam"
+}
+
+
+==================================================
+
+--- FINAL TEST SET PERFORMANCE ---
+Timestamp: 2025-10-18 19:11:32
+
+R-squared (R²): 0.7371204017752254
+Mean Absolute Error (MAE): 0.11910549927776506
+Root Mean Squared Error (RMSE): 0.2006144468390153
+Mean Absolute Percentage Error (MAPE): 17.21646875529154
+Accuracy @ 10%: 36.36363636363637
+Accuracy @ 25%: 77.27272727272727
+
+==================================================
+

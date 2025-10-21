@@ -169,12 +169,14 @@ if __name__ == "__main__":
         
     main(args)
 
+    
+
 """
 Fluke_BrickCladding_2holes_0808_2025_noshutter
     vid-1:
     python -m src_feature_based.debug-files.analyze_pixel_trends \
         /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0808_2025_noshutter/T1.4V_2025-08-08-19-44-50_20_32_12_.mat \
-        debug_ouputs/Fluke_BrickCladding_2holes_0808_2025_noshutter/vid-1
+        debug_ouputs/pixel_trends/Fluke_BrickCladding_2holes_0808_2025_noshutter/vid-1
     vid-6:
     python -m src_feature_based.debug-files.analyze_pixel_trends \
         /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0808_2025_noshutter/T1.8V_2025-08-08-19-04-55_20_28_8_.mat \
@@ -183,10 +185,10 @@ Fluke_BrickCladding_2holes_0808_2025_noshutter
 
 """
 Fluke_BrickCladding_2holes_0616_2025_noshutter
-    vid-6:
+    vid-1:
     python -m src_feature_based.debug-files.analyze_pixel_trends \
-        /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0616_2025_noshutter/T2.0V_6.3Pa_2025-6-16-17-40-19_20_26_6_.mat \
-        debug_ouputs/Fluke_BrickCladding_2holes_0616_2025_noshutter/vid-6
+        /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0616_2025_noshutter/T1.4V_2.2Pa_2025-6-16-16-33-25_20_34_14_.mat \
+        debug_ouputs/Fluke_BrickCladding_2holes_0616_2025_noshutter/vid-1
 """
 
 """
@@ -207,6 +209,9 @@ Fluke_HardyBoard_08132025_2holes_noshutter
         /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_08132025_2holes_noshutter/T1.4V_2025-08-15-18-45-57_21_32_11_.mat \
         debug_ouputs/Fluke_HardyBoard_08132025_2holes_noshutter/vid-4
 
+python -m src_feature_based.debug-files.analyze_pixel_trends \
+    /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_08132025_2holes_noshutter/T1.4V_2025-08-14-15-47-12_21_34_13_.mat \
+    debug_ouputs/pixel_trends/Fluke_HardyBoard_08132025_2holes_noshutter/vid-1
 
         
 python -m src_feature_based.debug-files.analyze_pixel_trends \

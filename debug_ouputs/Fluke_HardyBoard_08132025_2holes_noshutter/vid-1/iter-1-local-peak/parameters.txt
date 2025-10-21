@@ -1,0 +1,18 @@
+--- Run Parameters ---
+activity_method: kendall_tau
+checkpoint: SAM/sam_checkpoints/sam_vit_b_01ec64.pth
+create_presentation_visual: True
+env_para: 1
+input: /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_08132025_2holes_noshutter/T1.4V_2025-08-14-15-47-12_21_34_13_.mat
+model_type: vit_b
+num_leaks: 2
+output_dir: debug_ouputs/Fluke_HardyBoard_08132025_2holes_noshutter/vid-1/iter-1-local-peak
+peak_abs_threshold: 0.2
+peak_min_distance: 50
+processing_mode: two_hole_assign
+prompt_box_size: 30
+roi_border_percent: 0.1
+roi_erosion: 3
+roi_method: border
+spatial_filter: bilateral
+temporal_smooth_window: 3
