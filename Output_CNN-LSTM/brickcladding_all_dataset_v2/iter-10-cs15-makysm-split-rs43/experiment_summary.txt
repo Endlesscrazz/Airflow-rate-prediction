@@ -1,0 +1,62 @@
+--- DATA CREATION PARAMETERS ---
+Timestamp: 2025-10-25 15:51:09
+
+Experiment Name: brickcladding_all_dataset_v2
+Source Ground Truth CSV: airflow_ground_truth_brickcladding_all.csv
+V2 Dataset Parameters:
+{
+    "OUTPUT_SUBDIR": "dataset_cs15_nf150_aug100",
+    "CROP_SIZE": 15,
+    "NUM_AUGMENTATIONS": 100,
+    "ENABLE_GEOMETRIC_AUGMENTATION": false,
+    "AUGMENTATION_PARAMS": {
+        "NOISE_LEVEL": 0.05,
+        "ROTATION_DEGREES": 10,
+        "TRANSLATION_FRAC": 0.1
+    }
+}
+
+Frames Per Sample: 150
+Focus Duration (seconds): 30
+Final Train Samples (with augmentations): 5454
+Final Validation Samples: 16
+Final Test Samples: 14
+Original Train Samples: 54
+Original Validation Samples: 16
+Original Test Samples: 14
+
+==================================================
+
+--- FINAL MODEL TRAINING PARAMETERS ---
+Timestamp: 2025-10-25 16:01:13
+
+Experiment Name: brickcladding_all_dataset_v2
+Batch Size: 64
+Number of Epochs Run: 33
+Best Model Found at Epoch: 8
+Best Validation MAE: 0.14811797440052032
+Final Hyperparameters Used:
+{
+    "lr": 0.00010386262010394423,
+    "weight_decay": 3.0503844758115838e-05,
+    "dropout_rate": 0.297074888861393,
+    "lstm_hidden_size": 256,
+    "lstm_layers": 2,
+    "optimizer": "AdamW"
+}
+
+
+==================================================
+
+--- FINAL TEST SET PERFORMANCE ---
+Timestamp: 2025-10-25 16:01:49
+
+R-squared (R²): 0.89228256394473
+Mean Absolute Error (MAE): 0.1178065796136856
+Root Mean Squared Error (RMSE): 0.14801910235263704
+Mean Absolute Percentage Error (MAPE): 21.910830892239918
+Accuracy @ 10%: 28.57142857142857
+Accuracy @ 25%: 57.14285714285714
+
+==================================================
+

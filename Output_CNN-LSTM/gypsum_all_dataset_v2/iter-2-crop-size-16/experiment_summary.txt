@@ -1,0 +1,154 @@
+--- DATA SPLITTING DETAILS ---
+Timestamp: 2025-10-20 12:08:19
+
+Splitting Strategy: StratifiedGroupKFold
+Random Seed: 42
+Number of Folds (for dev/test split): 5
+Number of Folds (for train/val split): 5
+Stratification Bins (qcut): 5
+Original Dataset Stats:
+{
+    "Total Samples": 66,
+    "Unique Videos (Groups)": 66,
+    "Airflow Rate Distribution": {
+        "count": 66.0,
+        "mean": 0.764521515151515,
+        "std": 0.28467249735167294,
+        "min": 0.38087,
+        "25%": 0.49703,
+        "50%": 0.76483,
+        "75%": 1.037,
+        "max": 1.28246
+    }
+}
+
+Split Counts:
+{
+    "Training Set": {
+        "Samples": 41,
+        "Proportion": "62.12%",
+        "Unique Videos": 41
+    },
+    "Validation Set": {
+        "Samples": 11,
+        "Proportion": "16.67%",
+        "Unique Videos": 11
+    },
+    "Test Set": {
+        "Samples": 14,
+        "Proportion": "21.21%",
+        "Unique Videos": 14
+    }
+}
+
+
+==================================================
+
+--- DATA SPLITTING DETAILS ---
+Timestamp: 2025-10-20 12:11:12
+
+Splitting Strategy: StratifiedGroupKFold
+Random Seed: 42
+Number of Folds (for dev/test split): 5
+Number of Folds (for train/val split): 5
+Stratification Bins (qcut): 5
+Original Dataset Stats:
+{
+    "Total Samples": 66,
+    "Unique Videos (Groups)": 66,
+    "Airflow Rate Distribution": {
+        "count": 66.0,
+        "mean": 0.764521515151515,
+        "std": 0.28467249735167294,
+        "min": 0.38087,
+        "25%": 0.49703,
+        "50%": 0.76483,
+        "75%": 1.037,
+        "max": 1.28246
+    }
+}
+
+Split Counts:
+{
+    "Training Set": {
+        "Samples": 41,
+        "Proportion": "62.12%",
+        "Unique Videos": 41
+    },
+    "Validation Set": {
+        "Samples": 11,
+        "Proportion": "16.67%",
+        "Unique Videos": 11
+    },
+    "Test Set": {
+        "Samples": 14,
+        "Proportion": "21.21%",
+        "Unique Videos": 14
+    }
+}
+
+
+==================================================
+
+--- DATA CREATION PARAMETERS ---
+Timestamp: 2025-10-20 12:13:06
+
+Experiment Name: gypsum_all_dataset_v2
+Source Ground Truth CSV: airflow_ground_truth_gypsum_all.csv
+V2 Dataset Parameters:
+{
+    "OUTPUT_SUBDIR": "dataset_cs16_aug100",
+    "CROP_SIZE": 16,
+    "NUM_AUGMENTATIONS": 100,
+    "ENABLE_GEOMETRIC_AUGMENTATION": true,
+    "AUGMENTATION_PARAMS": {
+        "NOISE_LEVEL": 0.05,
+        "ROTATION_DEGREES": 10,
+        "TRANSLATION_FRAC": 0.1
+    }
+}
+
+Frames Per Sample: 25
+Focus Duration (seconds): 15
+Final Train Samples (with augmentations): 4141
+Final Validation Samples: 11
+Final Test Samples: 14
+Original Train Samples: 41
+Original Validation Samples: 11
+Original Test Samples: 14
+
+==================================================
+
+--- FINAL MODEL TRAINING PARAMETERS ---
+Timestamp: 2025-10-20 12:18:14
+
+Experiment Name: gypsum_all_dataset_v2
+Batch Size: 64
+Number of Epochs Run: 69
+Best Model Found at Epoch: 44
+Best Validation MAE: 0.14384236931800842
+Final Hyperparameters Used:
+{
+    "lr": 9.6681665526918e-05,
+    "weight_decay": 1.0347688244846932e-06,
+    "dropout_rate": 0.2601194262689661,
+    "lstm_hidden_size": 64,
+    "lstm_layers": 3,
+    "optimizer": "Adam"
+}
+
+
+==================================================
+
+--- FINAL TEST SET PERFORMANCE ---
+Timestamp: 2025-10-20 12:37:02
+
+R-squared (R²): 0.6266219291229728
+Mean Absolute Error (MAE): 0.10958328458309174
+Root Mean Squared Error (RMSE): 0.1742151431591596
+Mean Absolute Percentage Error (MAPE): 15.43163793313303
+Accuracy @ 10%: 35.714285714285715
+Accuracy @ 25%: 85.71428571428571
+
+==================================================
+

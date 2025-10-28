@@ -1,0 +1,21 @@
+--- FINAL MODEL TRAINING PARAMETERS ---
+Timestamp: 2025-10-20 18:18:24
+
+Experiment Name: brickcladding_all_dataset_v2
+Batch Size: 64
+Number of Epochs Run: 82
+Best Model Found at Epoch: 57
+Best Validation MAE: 0.10691414028406143
+Final Hyperparameters Used:
+{
+    "lr": 0.00012578935386695162,
+    "weight_decay": 3.3668458829765327e-06,
+    "dropout_rate": 0.3221973421324753,
+    "lstm_hidden_size": 256,
+    "lstm_layers": 2,
+    "optimizer": "Adam"
+}
+
+
+==================================================
+

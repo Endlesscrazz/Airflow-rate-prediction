@@ -1,0 +1,76 @@
+# =================================
+# General Python & System Files
+# =================================
+# Compiled Python files
+__pycache__/
+*.pyc
+
+# Distribution / packaging
+build/
+dist/
+eggs/
+*.egg-info/
+
+# Environment and Editor files
+.env
+.venv
+venv/
+env/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# =================================
+# Project-Specific Data & Large Files
+# =================================
+#
+# --- Raw and Processed Datasets ---
+datasets/
+cnn_dataset-old/
+masks_raw/
+CNN_dataset/
+
+output_SAM/
+stabilization_poc_output/
+
+# --- Large Model Checkpoints ---
+SAM/
+
+# =================================
+# Experiment Outputs & Artifacts
+# =================================
+#
+# --- Trained Models ---
+trained_models/
+trained_models_final/
+trained_models_*_CV/
+
+# --- Results ---
+results_*_CV/
+CNN_Results/
+holdout_results/
+Reports/ 
+
+# --- Visualizations & Temporary Outputs ---
+verified_masks/
+visualizations/
+plots/
+debug_masks/
+hotspot_masks/
+
+# --- Logs ---
+# Ignore log files and SLURM output files.
+logs/
+*.log
+*.out
+
+# --- Specific Generated Files ---
+master_features.csv
+
+# =================================
+# Archives
+# =================================
+#
+# Ignore the archive directory and its contents.
+archive/
