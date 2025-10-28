@@ -31,7 +31,7 @@ cnn_dataset-old/
 masks_raw/
 CNN_dataset/
 
-output_SAM/
+/Output_SAM/
 stabilization_poc_output/
 
 # --- Large Model Checkpoints ---
