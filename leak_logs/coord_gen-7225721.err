@@ -1,0 +1,11 @@
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) chpc/1.0
+[Parallel(n_jobs=-1)]: Using backend LokyBackend with 16 concurrent workers.
+[Parallel(n_jobs=-1)]: Done   2 out of   8 | elapsed:  2.1min remaining:  6.2min
+[Parallel(n_jobs=-1)]: Done   3 out of   8 | elapsed:  2.1min remaining:  3.4min
+[Parallel(n_jobs=-1)]: Done   4 out of   8 | elapsed:  2.1min remaining:  2.1min
+[Parallel(n_jobs=-1)]: Done   5 out of   8 | elapsed:  3.2min remaining:  1.9min
+[Parallel(n_jobs=-1)]: Done   6 out of   8 | elapsed:  3.2min remaining:  1.1min
+[Parallel(n_jobs=-1)]: Done   8 out of   8 | elapsed:  3.3min finished

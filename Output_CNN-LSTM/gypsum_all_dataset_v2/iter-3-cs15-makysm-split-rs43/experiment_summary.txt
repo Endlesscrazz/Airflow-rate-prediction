@@ -1,0 +1,62 @@
+--- DATA CREATION PARAMETERS ---
+Timestamp: 2025-10-25 17:28:20
+
+Experiment Name: gypsum_all_dataset_v2
+Source Ground Truth CSV: airflow_ground_truth_gypsum_all.csv
+V2 Dataset Parameters:
+{
+    "OUTPUT_SUBDIR": "dataset_cs15_nf150_aug100",
+    "CROP_SIZE": 15,
+    "NUM_AUGMENTATIONS": 100,
+    "ENABLE_GEOMETRIC_AUGMENTATION": false,
+    "AUGMENTATION_PARAMS": {
+        "NOISE_LEVEL": 0.05,
+        "ROTATION_DEGREES": 10,
+        "TRANSLATION_FRAC": 0.1
+    }
+}
+
+Frames Per Sample: 150
+Focus Duration (seconds): 30
+Final Train Samples (with augmentations): 4242
+Final Validation Samples: 13
+Final Test Samples: 11
+Original Train Samples: 42
+Original Validation Samples: 13
+Original Test Samples: 11
+
+==================================================
+
+--- FINAL MODEL TRAINING PARAMETERS ---
+Timestamp: 2025-10-25 17:50:04
+
+Experiment Name: gypsum_all_dataset_v2
+Batch Size: 64
+Number of Epochs Run: 85
+Best Model Found at Epoch: 60
+Best Validation MAE: 0.07836110889911652
+Final Hyperparameters Used:
+{
+    "lr": 9.6681665526918e-05,
+    "weight_decay": 1.0347688244846932e-06,
+    "dropout_rate": 0.2601194262689661,
+    "lstm_hidden_size": 64,
+    "lstm_layers": 3,
+    "optimizer": "AdamW"
+}
+
+
+==================================================
+
+--- FINAL TEST SET PERFORMANCE ---
+Timestamp: 2025-10-25 18:36:07
+
+R-squared (R²): 0.5924587838057449
+Mean Absolute Error (MAE): 0.09690186454772949
+Root Mean Squared Error (RMSE): 0.15855702242291095
+Mean Absolute Percentage Error (MAPE): 11.826374436399739
+Accuracy @ 10%: 54.54545454545454
+Accuracy @ 25%: 90.9090909090909
+
+==================================================
+

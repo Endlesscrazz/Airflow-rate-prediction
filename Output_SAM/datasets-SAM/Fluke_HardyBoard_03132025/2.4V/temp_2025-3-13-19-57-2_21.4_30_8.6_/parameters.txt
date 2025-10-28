@@ -1,0 +1,18 @@
+--- Run Parameters ---
+activity_method: kendall_tau
+base_output_dir: output_SAM/datasets/Fluke_HardyBoard_03132025/2.4V
+checkpoint_path: SAM/sam_checkpoints/sam_vit_b_01ec64.pth
+dataset_dir: /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_03132025/2.4V
+env_para: 1
+model_type: vit_b
+num_leaks: 1
+peak_abs_threshold: 0.2
+peak_min_distance: 50
+processing_mode: standard
+prompt_box_size: 30
+prompt_method: local_peak
+roi_border_percent: 0.1
+roi_erosion: 3
+roi_method: border
+spatial_filter: bilateral
+temporal_smooth_window: 3
