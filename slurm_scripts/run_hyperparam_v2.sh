@@ -7,7 +7,7 @@
 #SBATCH --partition=yqu-gpu-np
 #SBATCH --nodelist=notch448           # dedicated owner GPU node
 #SBATCH --job-name=airflow-v2-tune
-#SBATCH --output=logs/v2_tuning-%j.out
+#SBATCH --output=hyperparam-logs/v2_tuning-%j.out
 #SBATCH --time=2-00:00:00             # 2 days (max wall time)
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -27,11 +27,12 @@ conda activate "${CONDA_ENV_NAME}"
 mkdir -p logs
 
 echo "--- Starting Hyperparameter Search ---"
+echo "hardyboard-all-dataset"
 
 # Run the search with 100 trials
 python src_cnn_v2/hyperparam_search_v2.py \
-  --n_trials 200 \
-  --study_name "gypsum-10-hole-dataset-dataset-cs16-v2-tuning" \
+  --n_trials 100 \
+  --study_name "hardyboard-all-dataset-cs56-v2-tuning" \
   --storage "sqlite:///optuna_gypsum_v2.db"
 
 echo "--- Search Complete ---"

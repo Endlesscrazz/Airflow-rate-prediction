@@ -42,7 +42,7 @@ echo "--- STEP 1: Creating Lightweight Master Metadata ---"
 python -m src_cnn_v2.create_metadata_v2
 
 echo "--- STEP 2: Splitting Data (using seed from config) ---"
-python -m src_cnn_v2.split_data_v2
+python -m src_cnn_v2.split_data_maksym
 
 echo "--- STEP 3: Creating/Updating Cropped & Augmented Dataset ---"
 echo "--- (This will skip creating .npy files that already exist) ---"

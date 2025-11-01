@@ -3,8 +3,7 @@
 Creates a lightweight master metadata file for the V2 pipeline.
 
 This script reads the ground truth CSV and, for each sample, verifies that
-the required raw .mat video and .npy mask files exist. It does NOT calculate
-any handcrafted features, making it much faster than generate_master_features.py.
+the required raw .mat video and the corresponding _coordinates.json file exist.
 
 The output is a 'master_metadata_v2.csv' file containing only the essential
 columns needed for the V2 data preparation workflow.
@@ -25,28 +24,26 @@ from src_cnn_v2 import config_v2 as cfg
 def main():
     print("--- Creating Lightweight Master Metadata for V2 Pipeline ---")
 
-    # Define the output path using the V2 config
-    METADATA_SAVE_PATH = os.path.join(cfg.OUTPUT_DIR, "master_metadata_v2.csv")
-    os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+    METADATA_SAVE_PATH = cfg.MASTER_METADATA_PATH
+    os.makedirs(os.path.dirname(METADATA_SAVE_PATH), exist_ok=True)
 
     try:
         df_ground_truth = pd.read_csv(cfg.GROUND_TRUTH_CSV_PATH)
         print(f"Loaded {len(df_ground_truth)} total samples from {cfg.GROUND_TRUTH_CSV_PATH}")
     except FileNotFoundError:
-        sys.exit(f"FATAL: Ground truth CSV not found at '{cfg.GROUND_TRUTH_CSV_PATH}'.")
+        sys.exit(f"FATAL: Ground truth CSV not found at '{cfg.GROUND_TRUTH_CSV_PATH}'. Please run 'create_ground_truth_labels.py' first.")
 
     valid_samples = []
     
-    for index, row in tqdm(df_ground_truth.iterrows(), total=len(df_ground_truth), desc="Verifying samples"):
+    for index, row in tqdm(df_ground_truth.iterrows(), total=len(df_ground_truth), desc="Verifying sample files"):
         try:
             video_id = row['video_id']
             hole_id = str(row['hole_id'])
 
-            numeric_hole_id = hole_id.split('_')[0]
-            
-            # --- Verify existence of raw files (using the robust logic) ---
-            mat_filepath, mask_dir_path, found_config_key = (None, None, None)
+            # --- 1. Verify existence of the raw .mat video file ---
+            mat_filepath, found_config_key = (None, None)
             for d_key, d_conf in cfg.DATASET_CONFIGS.items():
+                # Construct search pattern within the specific dataset subfolder
                 video_search_pattern = os.path.join(cfg.RAW_DATASET_PARENT_DIR, d_conf["dataset_subfolder"], '**', f"{video_id}.mat")
                 video_results = glob.glob(video_search_pattern, recursive=True)
                 if video_results:
@@ -54,37 +51,24 @@ def main():
                     break
             
             if not mat_filepath:
-                print(f"\nWarning: Skipping sample '{video_id}_{hole_id}'. Reason: .mat file not found.")
+                tqdm.write(f"\nWarning: Skipping sample '{video_id}_{hole_id}'. Reason: .mat file not found.")
                 continue
 
-            mask_subfolder = cfg.DATASET_CONFIGS[found_config_key]["dataset_subfolder"]
-            mask_search_pattern = os.path.join(cfg.RAW_MASK_PARENT_DIR, mask_subfolder, '**', video_id)
-            mask_dir_results = glob.glob(mask_search_pattern, recursive=True)
-            if mask_dir_results:
-                for path in mask_dir_results:
-                    if os.path.isdir(path): mask_dir_path = path; break
-            
-            if not mask_dir_path:
-                print(f"\nWarning: Skipping sample '{video_id}_{hole_id}'. Reason: Mask directory not found.")
+            # --- 2. Verify existence of the coordinates.json file ---
+            coord_subfolder = cfg.DATASET_CONFIGS[found_config_key]["dataset_subfolder"]
+            # Search for the video-specific subfolder created by find_leaking_holes.py
+            coord_search_pattern = os.path.join(cfg.RAW_MASK_PARENT_DIR, coord_subfolder, '**', video_id)
+            coord_dir_results = glob.glob(coord_search_pattern, recursive=True)
+            coord_dir_path = next((path for path in coord_dir_results if os.path.isdir(path)), None)
+
+            if not coord_dir_path:
+                tqdm.write(f"\nWarning: Skipping sample '{video_id}_{hole_id}'. Reason: Coordinate directory not found.")
                 continue
 
-            # --- MASK FILE FINDING LOGIC ---
-            # This logic handles multiple naming conventions.
-            
-            # Path 1: Exact match (e.g., hole_id '2' -> _mask_2.npy) - for multi-hole
-            path1 = os.path.join(mask_dir_path, f"{video_id}_mask_{numeric_hole_id}.npy")
-            path2 = os.path.join(mask_dir_path, f"{video_id}_mask_0.npy")
-
-            individual_mask_path = None
-            if os.path.exists(path1):
-                individual_mask_path = path1
-            elif numeric_hole_id == '1' and os.path.exists(path2):
-                individual_mask_path = path2
-            
-            if not individual_mask_path:
-                print(f"\nWarning: Skipping sample '{video_id}_{hole_id}'. Reason: Mask file not found.")
-                print(f"  - Tried path 1 (using ID '{numeric_hole_id}'): {path1}")
-                if numeric_hole_id == '1': print(f"  - Tried path 2 (using ID '0'): {path2}")
+            coord_path = os.path.join(coord_dir_path, f"{video_id}_coordinates.json")
+            if not os.path.exists(coord_path):
+                tqdm.write(f"\nWarning: Skipping sample '{video_id}_{hole_id}'. Reason: Coordinates file not found.")
+                tqdm.write(f"  - Expected file at: {coord_path}")
                 continue
 
             # If all files exist, add the sample to our list
@@ -96,13 +80,11 @@ def main():
             print(f"\nError processing row {index}: {e}")
             continue
 
-    # Create the final DataFrame
-    df_meta = pd.DataFrame(valid_samples)
-
-    if df_meta.empty:
-        print("\nFATAL: No valid samples found. Check paths in config_v2.py and file locations.")
+    if not valid_samples:
+        print("\nFATAL: No valid samples found. Check paths in config_v2.py and ensure 'find_leaking_holes.py' has been run successfully.")
         return
         
+    df_meta = pd.DataFrame(valid_samples)
     df_meta.to_csv(METADATA_SAVE_PATH, index=False)
     
     print(f"\n--- Master Metadata Creation Complete ---")

@@ -1,15 +1,12 @@
 # src_cnn_v2/find_leaking_holes.py
 """
-Batch-Processing Script for Advanced Leak Detection. (VERSION 5 - FULLY PARALLEL)
+Batch-Processing Script for Advanced Leak Detection. (VERSION 6 - FINAL PRODUCTION)
 
-Purpose:
-  - Processes a directory of .mat video files in parallel using all available CPU cores.
-  - Implements the fused (Temporal + Spatial) signal logic to find leak "epicenters".
-  - Intelligently chooses the fastest available temporal analysis method.
-  - Robustly assigns hole IDs using positional anchors where available, and falls back
-    to a signal-strength-based method otherwise.
-  - Saves precise (y, x) coordinates for each leak into a lightweight .json file.
-  - Generates verification plots when run with the --debug flag.
+- Processes videos in parallel using all available CPU cores.
+- Implements Temporal Normalization to make detection robust to absolute temperature.
+- Fuses Temporal + Spatial signals to find precise leak "epicenters".
+- Robustly assigns hole IDs using positional anchors where available.
+- Generates verification plots when run with the --debug flag.
 """
 import os
 import sys
@@ -23,29 +20,27 @@ import matplotlib.patches as patches
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy import stats
 from skimage.feature import peak_local_max
-from tqdm import tqdm
-import traceback
 from joblib import Parallel, delayed
 from scipy.spatial.distance import cdist
+import traceback
+from tqdm import tqdm
 
 # --- ANCHOR DATABASE ---
 POSITIONAL_ANCHORS = {
-    # "0616": { # Use the date as the unique key
-    #     "1": np.array([302, 332]), # center hole
-    #     "2": np.array([128, 251])  # top left corner hole
-    # },
-    # "0805": { # Use the date as the unique key
-    #     "1": np.array([274, 328]), # center hole
-    #     "2": np.array([360, 140])  # bottom_left hole
-    # },
-    "0808": { # Use the date as the unique key
+    "0616": {
+        "1": np.array([302, 332]), # center hole
+        "2": np.array([128, 251])  # top left corner hole
+    },
+    "0805": {
+        "1": np.array([274, 328]), # center hole
+        "2": np.array([360, 140])  # bottom_left hole
+    },
+    "0808": {
         "1": np.array([269, 327]), # center hole
         "2": np.array([358, 142])  # Corrected bottom_left hole
     }
-    # Add other datasets here as needed (e.g., 'hardyboard' using '0813')
+    
 }
-    # Add other datasets here as needed (e.g., 'hardyboard')
-
 
 # --- Core Logic Functions ---
 
@@ -102,30 +97,16 @@ def find_top_n_leaks(score_map, num_leaks, min_distance=50):
     return candidates[:num_leaks]
 
 def find_leaks_in_rois(score_map, anchor_points, search_radius=50):
-    """
-    Finds the strongest peak within a specific search radius around each anchor point.
-    This is a robust method that ignores noise in other parts of the image.
-    """
     assigned_leaks = []
     H, W = score_map.shape
-
     for hole_id, anchor_coord in anchor_points.items():
-        # Define the Search Zone (ROI) boundaries
         center_y, center_x = anchor_coord
-        y_min = max(0, center_y - search_radius)
-        y_max = min(H, center_y + search_radius)
-        x_min = max(0, center_x - search_radius)
-        x_max = min(W, center_x + search_radius)
-
-        # Create a mask for the entire image, with only the ROI set to True
+        y_min, y_max = max(0, center_y - search_radius), min(H, center_y + search_radius)
+        x_min, x_max = max(0, center_x - search_radius), min(W, center_x + search_radius)
         roi_mask = np.zeros_like(score_map, dtype=bool)
         roi_mask[y_min:y_max, x_min:x_max] = True
-
-        # Find all peaks ONLY within the ROI
         roi_candidates = find_top_n_leaks(score_map * roi_mask, num_leaks=1, min_distance=1)
-        
         if roi_candidates:
-            # If a peak was found in the zone, it's our leak
             best_peak_in_roi = roi_candidates[0]
             assigned_leaks.append({
                 "hole_id": int(hole_id),
@@ -133,22 +114,20 @@ def find_leaks_in_rois(score_map, anchor_points, search_radius=50):
                 "center_x": int(best_peak_in_roi['coords'][1]),
                 "score": float(best_peak_in_roi['score'])
             })
-
     return assigned_leaks
 
 def save_verification_plot(base_frame, score_map, leak_candidates, crop_size, save_path):
-    # This function remains unchanged
     num_found = len(leak_candidates)
     fig, ax = plt.subplots(1, 2, figsize=(14, 7))
     fig.suptitle(f"Leak Detection Verification ({num_found} Leak(s) Found)", fontsize=16)
-    # ... (rest of the plotting code is the same)
     ax[0].imshow(base_frame, cmap='inferno')
     ax[0].set_title("Original Frame with Crop Areas")
     im = ax[1].imshow(score_map, cmap='hot')
     ax[1].set_title("Fused Score Map (Temporal * Spatial)")
     fig.colorbar(im, ax=ax[1], fraction=0.046, pad=0.04, label="Score")
     for i, leak in enumerate(leak_candidates):
-        center_y, center_x = leak['coords']
+        # Use .get for safe dictionary access
+        center_y, center_x = leak.get('coords', (leak.get('center_y', 0), leak.get('center_x', 0)))
         ax[0].scatter([center_x], [center_y], s=200, c='cyan', marker='*')
         rect = patches.Rectangle((center_x - crop_size // 2, center_y - crop_size // 2), crop_size, crop_size, linewidth=2.5, edgecolor='lime', facecolor='none')
         ax[0].add_patch(rect)
@@ -161,12 +140,7 @@ def save_verification_plot(base_frame, score_map, leak_candidates, crop_size, sa
     plt.savefig(save_path, dpi=150)
     plt.close(fig)
 
-
-# --- NEW: Worker Function for Parallel Processing ---
 def process_video(video_path, args):
-    """
-    Processes a single video file. This is the "workload" for each parallel job.
-    """
     try:
         relative_path = os.path.relpath(os.path.dirname(video_path), args.dataset_dir)
         base_filename = os.path.splitext(os.path.basename(video_path))[0]
@@ -174,45 +148,33 @@ def process_video(video_path, args):
         os.makedirs(video_output_dir, exist_ok=True)
 
         frames = scipy.io.loadmat(video_path)['TempFrames'].astype(np.float64)
-
-        # --- ADD TEMPORAL NORMALIZATION HERE ---
-        # Transpose to (T, H, W) for easier normalization
+        
         frames_T_first = frames.transpose(2, 0, 1)
-        # Calculate the mean of each frame
         frame_means = frames_T_first.mean(axis=(1, 2), keepdims=True)
-        # Normalize and transpose back to (H, W, T)
-        normalized_frames_T_first = frames_T_first / (frame_means + 1e-9)
-        frames = normalized_frames_T_first.transpose(1, 2, 0)
+        frame_means[frame_means < 1e-6] = 1.0
+        normalized_frames_T_first = frames_T_first / frame_means
+        frames_normalized = normalized_frames_T_first.transpose(1, 2, 0)
 
-        temporal_map = calculate_temporal_trend_map(frames)
-        heat_map = calculate_local_heat_z_score(frames)
+        temporal_map = calculate_temporal_trend_map(frames_normalized)
+        heat_map = calculate_local_heat_z_score(frames_normalized)
         score_map = temporal_map * (heat_map ** args.heat_power)
         
-        all_candidates = find_top_n_leaks(score_map, num_leaks=10, min_distance=50)
-        if not all_candidates:
-            return # Silently skip if no peaks are found
-
-        # --- SMART ASSIGNMENT LOGIC ---
         output_data = []
         anchor_set_key = next((key for key in POSITIONAL_ANCHORS if key in video_path), None)
 
         if anchor_set_key:
-            # PATH A: Use robust "Targeted Search" in ROIs
             anchor_points = POSITIONAL_ANCHORS[anchor_set_key]
-            output_data = find_leaks_in_rois(score_map, anchor_points, search_radius=50) # <-- NEW CALL
+            output_data = find_leaks_in_rois(score_map, anchor_points, search_radius=50)
         else:
-            # PATH B (FALLBACK): Use simple "top N by score"
-            # This part remains unchanged
-            tqdm.write(f"  - INFO: No positional anchors for '{base_filename}'. Using top {args.num_leaks} by score.")
-            top_candidates = find_top_n_leaks(score_map, num_leaks=args.num_leaks, min_distance=50)
-            for i, leak in enumerate(top_candidates):
+            all_candidates = find_top_n_leaks(score_map, num_leaks=args.num_leaks, min_distance=50)
+            for i, leak in enumerate(all_candidates):
                 y, x = leak['coords']
                 output_data.append({
                     "hole_id": i + 1,
                     "center_y": int(y), "center_x": int(x), "score": float(leak['score'])
                 })
         
-        if not output_data: return # Skip if assignment results in no leaks
+        if not output_data: return
 
         json_path = os.path.join(video_output_dir, f"{base_filename}_coordinates.json")
         with open(json_path, 'w') as f:
@@ -249,8 +211,6 @@ def main():
 
     print(f"Found {len(mat_file_paths)} videos to process. Starting parallel processing...")
 
-    # --- FULLY PARALLEL EXECUTION ---
-    # This will now process all videos in parallel, showing a progress bar.
     Parallel(n_jobs=-1, verbose=10)(
         delayed(process_video)(video_path, args)
         for video_path in mat_file_paths
