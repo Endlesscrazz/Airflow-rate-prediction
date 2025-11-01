@@ -7,43 +7,42 @@ This project predicts quantitative airflow leakage rates from thermal infrared v
 Airflow-rate-prediction/
 │
 ├── CNN_dataset/
-│ └── <experiment_name>/
-│ ├── master_metadata_v2.csv
-│ ├── train_split_seed42.csv
-│ ├── val_split_seed42.csv
-│ └── test_split_seed42.csv
-│ └── dataset_cs15_nf150_aug99/
-│ ├── train_metadata_seed42.csv
-│ ├── ... (all .npy image crop files)
+│   └── <experiment_name>/
+│       ├── master_metadata_v2.csv
+│       ├── train_split_seed42.csv
+│       ├── val_split_seed42.csv
+│       └── test_split_seed42.csv
+│       └── dataset_cs15_nf150_aug99/
+│           ├── train_metadata_seed42.csv
+│           ├── ... (all .npy image crop files)
 │
 ├── Output_CNN-LSTM/
-│ └── <experiment_name>/
-│ └── <experiment_version>/
-│ ├── best_model_v2.pth
-│ ├── scaler_v2.pkl
-│ ├── training_log.csv
-│ ├── test_set_report.xlsx
-│ └── experiment_summary.txt
+│   └── <experiment_name>/
+│       └── <experiment_version>/
+│           ├── best_model_v2.pth
+│           ├── scaler_v2.pkl
+│           ├── training_log.csv
+│           ├── test_set_report.xlsx
+│           └── experiment_summary.txt
 │
 ├── Output_SAM/
-│ └── datasets/
-│ └── <dataset_subfolder>/
-│ └── <video_id>/
-│ └── <video_id>_coordinates.json
+│   └── datasets/
+│       └── <dataset_subfolder>/
+│           └── <video_id>/
+│               └── <video_id>_coordinates.json
 │
 ├── scripts/
-│ └── create_ground_truth_labels.py
+│   └── create_ground_truth_labels.py
 │
 └── src_cnn_v2/
-├── config_v2.py
-├── find_leaking_holes.py
-├── create_metadata_v2.py
-├── split_data_v2.py
-├── create_cnn_dataset_v2.py
-├── train_v2.py
-├── predict_v2.py
-└── ... (model and utility files)
-
+    ├── config_v2.py
+    ├── find_leaking_holes.py
+    ├── create_metadata_v2.py
+    ├── split_data_v2.py
+    ├── create_cnn_dataset_v2.py
+    ├── train_v2.py
+    ├── predict_v2.py
+    └── ... (model and utility files)
 
 ## End-to-End Workflow
 
