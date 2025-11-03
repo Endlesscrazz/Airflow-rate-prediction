@@ -10,18 +10,18 @@ class CNNEncoder(nn.Module):
     def __init__(self, dropout=0.4):
         super().__init__()
         self.features = nn.Sequential(
-            # Input: (Batch, 1, 32, 32)
+            # Input: (Batch, 1, 15, 15)
             nn.Conv2d(1, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),  # -> (Batch, 32, 16, 16)
+            nn.MaxPool2d(2),  # -> (Batch, 32, 7, 7)
 
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1), # -> (64, 7, 7)
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
-            nn.MaxPool2d(2),  # -> (Batch, 64, 8, 8)
+            nn.MaxPool2d(2),  # -> (Batch, 64, 7, 7)
 
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1), # -> (128, 7, 7)
             nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
             nn.AdaptiveAvgPool2d((1, 1)) # -> (Batch, 128, 1, 1)

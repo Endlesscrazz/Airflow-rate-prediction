@@ -171,6 +171,47 @@ def create_comparison_gif(original_frames, shaky_frames, stabilized_frames, save
             
     print(f"  - Saved comparison GIF to: {save_path}")
 
+def create_heatmap_gif(shaky_frames, stabilized_frames, save_path, fps=10, cmap='inferno'):
+    """
+    Generates a 2-panel GIF showing Shaky and Stabilized videos side-by-side
+    in a heatmap colormap for better thermal visualization.
+    """
+    print(f"  - Creating 2-panel heatmap GIF: {os.path.basename(save_path)}")
+    H, W, T = shaky_frames.shape
+    
+    # Get the colormap from matplotlib
+    colormap = plt.get_cmap(cmap)
+    
+    # Find robust global min/max across both videos for consistent coloring
+    vmin = np.percentile(shaky_frames, 1)
+    vmax = np.percentile(shaky_frames, 99)
+    
+    # Normalize the data to [0, 1] based on these limits
+    norm = plt.Normalize(vmin=vmin, vmax=vmax)
+
+    with imageio.get_writer(save_path, mode='I', fps=fps) as writer:
+        for i in range(T):
+            # Apply normalization and colormap to each frame
+            # The colormap returns an (H, W, 4) RGBA image
+            shaky_rgba = colormap(norm(shaky_frames[:, :, i]))
+            stabilized_rgba = colormap(norm(stabilized_frames[:, :, i]))
+            
+            # Convert RGBA to RGB by discarding the alpha channel and scaling to 8-bit
+            shaky_rgb = (shaky_rgba[:, :, :3] * 255).astype(np.uint8)
+            stabilized_rgb = (stabilized_rgba[:, :, :3] * 255).astype(np.uint8)
+            
+            # Stack the two frames side-by-side
+            combined_frame = np.hstack((shaky_rgb, stabilized_rgb))
+            
+            # Add text labels
+            cv2.putText(combined_frame, '1. Shaky', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(combined_frame, '2. Stabilized', (W + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(combined_frame, f'Frame: {i}/{T}', (10, H - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            
+            writer.append_data(combined_frame)
+            
+    print(f"  - Saved heatmap GIF to: {save_path}")
+
 def main():
     parser = argparse.ArgumentParser(description="Debug script for leak detection and stabilization.")
     parser.add_argument("--video_path", required=True, help="Path to the single .mat video file.")
@@ -197,8 +238,8 @@ def main():
     except Exception as e:
         sys.exit(f"FATAL: Could not load video file. Error: {e}")
 
-    shaky_frames, _ = add_gradual_shake(original_frames, args)
-    stabilized_frames, _ = stabilize_video_phase_correlation(shaky_frames)
+    shaky_frames= add_gradual_shake(original_frames, args)
+    stabilized_frames= stabilize_video_phase_correlation(shaky_frames)
 
     videos_to_test = {"Original": original_frames, "Shaky": shaky_frames, "Stabilized": stabilized_frames}
     results = {}
@@ -216,24 +257,30 @@ def main():
             print("  - No leaks found.")
 
     # --- Generate Visualizations ---
-    # 1. Static 6-panel plot
+    # 1. Static 6-panel plot (unchanged)
     plot_save_path = os.path.join(args.output_dir, f"{base_filename}_full_comparison.png")
     save_full_comparison_plot(original_frames, shaky_frames, stabilized_frames,
                               results["Original"], results["Shaky"], results["Stabilized"],
                               args.crop_size, plot_save_path)
                               
-    # 2. NEW Dynamic 3-panel GIF
-    gif_save_path = os.path.join(args.output_dir, f"{base_filename}_comparison.gif")
+    # 2. Grayscale 3-panel GIF (unchanged)
+    gif_save_path = os.path.join(args.output_dir, f"{base_filename}_comparison_grayscale.gif")
     create_comparison_gif(original_frames, shaky_frames, stabilized_frames, gif_save_path)
+    
+    # --- NEW: Call the heatmap GIF function ---
+    # 3. Heatmap 2-panel GIF
+    heatmap_gif_save_path = os.path.join(args.output_dir, f"{base_filename}_comparison_heatmap.gif")
+    create_heatmap_gif(shaky_frames, stabilized_frames, heatmap_gif_save_path)
     
     print("\n--- Validation Script Finished Successfully ---")
 
 if __name__ == "__main__":
     main()
+
 """
 python src_cnn_v2/debug_leak_finder.py \
   --video_path "/Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0805_2025_noshutter/T1.6V_2025-08-05-19-57-24_20_34_14_.mat" \
-  --output_dir "debug_outputs/Fluke_BrickCladding_2holes_0805_2025_noshutter/vid-1-stablisied" \
+  --output_dir "debug_stabilized_outputs/Fluke_BrickCladding_2holes_0805_2025_noshutter/vid-1-stablisied" \
   --crop_size 16 \
   --num_leaks 2 \
   --shift1_frame 75 --shift1_x -10 --shift1_y 0 \
