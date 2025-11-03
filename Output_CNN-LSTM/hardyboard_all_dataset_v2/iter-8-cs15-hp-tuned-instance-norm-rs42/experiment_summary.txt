@@ -1,0 +1,33 @@
+--- FINAL MODEL TRAINING PARAMETERS ---
+Timestamp: 2025-11-03 08:30:42
+
+Experiment Name: hardyboard_all_dataset_v2
+Batch Size: 16
+Number of Epochs Run: 42
+Best Model Found at Epoch: 17
+Best Validation MAE: 0.17920096218585968
+Final Hyperparameters Used:
+{
+    "lr": 4.528800820609468e-05,
+    "weight_decay": 9.093332052026252e-07,
+    "dropout_rate": 0.2822039808933038,
+    "lstm_hidden_size": 64,
+    "lstm_layers": 2,
+    "optimizer": "Adam"
+}
+
+
+==================================================
+
+--- FINAL TEST SET PERFORMANCE ---
+Timestamp: 2025-11-03 08:49:07
+
+R-squared (R²): 0.2078166773102904
+Mean Absolute Error (MAE): 0.22371774155031557
+Root Mean Squared Error (RMSE): 0.3584081462374429
+Mean Absolute Percentage Error (MAPE): 24.82119434538463
+Accuracy @ 10%: 36.36363636363637
+Accuracy @ 25%: 68.18181818181817
+
+==================================================
+

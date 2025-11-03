@@ -1,4 +1,4 @@
-# src_cnn_v2/debug_leak_finder.py
+# src_cnn_v2/stabilize_detect_leak_hole.py
 """
 Standalone Debugging and Validation Script for Leak Detection & Stabilization. (Version 3)
 
@@ -10,7 +10,7 @@ Purpose:
   - Generates a comprehensive comparison plot AND a side-by-side comparison GIF.
 
 How to Run:
-  python src_cnn_v2/debug_leak_finder.py \
+  python src_cnn_v2/stabilize_detect_leak_hole.py \
     --video_path "/path/to/your/video.mat" \
     --output_dir "debug_stabilization_test" \
     --num_leaks 2
@@ -278,7 +278,7 @@ if __name__ == "__main__":
     main()
 
 """
-python src_cnn_v2/debug_leak_finder.py \
+python src_cnn_v2/stabilize_detect_leak_hole.py \
   --video_path "/Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0805_2025_noshutter/T1.6V_2025-08-05-19-57-24_20_34_14_.mat" \
   --output_dir "debug_stabilized_outputs/Fluke_BrickCladding_2holes_0805_2025_noshutter/vid-1-stablisied" \
   --crop_size 16 \
@@ -286,7 +286,7 @@ python src_cnn_v2/debug_leak_finder.py \
   --shift1_frame 75 --shift1_x -10 --shift1_y 0 \
   --shift2_frame 150 --shift2_x 0 --shift2_y -10
 
-python src_cnn_v2/debug_leak_finder.py \
+python src_cnn_v2/stabilize_detect_leak_hole.py \
   --video_path "/Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_08132025_2holes_noshutter/T1.4V_2025-08-14-15-47-12_21_34_13_.mat" \
   --output_dir "debug_outputs/Fluke_HardyBoard_08132025_2holes_noshutter/vid-1" \
   --crop_size 16 \
