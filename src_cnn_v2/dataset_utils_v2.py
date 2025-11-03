@@ -34,27 +34,35 @@ class CroppedSequenceDataset(Dataset):
         # 1. Get sample metadata
         sample_row = self.metadata.iloc[idx]
         
-        # 2. Load the cropped image sequence
+        # 2. Load the cropped image sequence (raw thermal values)
         sequence_path = os.path.join(self.cnn_dataset_dir, sample_row['image_path'])
         # Sequence is saved as (Time, Height, Width)
-        sequence_numpy = np.load(sequence_path).astype(np.float32)
+        data = np.load(sequence_path).astype(np.float32)
 
-        # 3. Add a channel dimension: (Time, 1, Height, Width)
-        sequence_numpy = np.expand_dims(sequence_numpy, axis=1)
+        # --- START OF NEW NORMALIZATION LOGIC ---
+        # 3. Perform dynamic instance normalization
+        #    This scales each video clip to its own 0-1 range.
+        max_val = np.max(data)
+        if max_val > 0:
+            data = data / max_val
+        # --- END OF NEW NORMALIZATION LOGIC ---
+
+        # 4. Add a channel dimension: (Time, 1, Height, Width)
+        data = np.expand_dims(data, axis=1)
         
-        # 4. Convert to PyTorch tensor
-        image_sequence_tensor = torch.from_numpy(sequence_numpy.copy())
+        # 5. Convert to PyTorch tensor
+        image_sequence_tensor = torch.from_numpy(data.copy())
 
-        # 5. Apply transforms if any (e.g., normalization)
+        # 6. Apply transforms if any (e.g., for normalization if you were using mean/std)
+        #    NOTE: Since we are doing instance normalization, this transform is likely not needed.
         if self.transform:
-            # We need to apply the transform to each frame in the sequence
             processed_frames = [self.transform(frame) for frame in image_sequence_tensor]
             image_sequence_tensor = torch.stack(processed_frames)
 
-        # 6. Load tabular data (delta_T)
+        # 7. Load tabular data (delta_T)
         delta_t_tensor = torch.tensor(sample_row['delta_T'], dtype=torch.float32)
 
-        # 7. Load the target variable (airflow_rate)
+        # 8. Load the target variable (airflow_rate)
         target_tensor = torch.tensor(
             sample_row['airflow_rate'] / cfg.MAX_FLOW_RATE, 
             dtype=torch.float32

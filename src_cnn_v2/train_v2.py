@@ -177,7 +177,7 @@ def main():
         dropout=cfg.INITIAL_PARAMS['dropout_rate']
     ).to(cfg.DEVICE)
 
-    criterion = lambda preds, targets: asymmetric_loss(preds, targets, over_prediction_penalty=2.5)
+    criterion = lambda preds, targets: asymmetric_loss(preds, targets, over_prediction_penalty=1.8)
 
     optimizer_name = cfg.INITIAL_PARAMS.get('optimizer', 'AdamW')
     if optimizer_name.lower() == 'adam':

@@ -15,7 +15,7 @@ EXPERIMENT_NAME = "hardyboard_all_dataset_v2"
 
 # --- 2. SET THE EXPERIMENT VERSION ---
 # Change this for each new run to create a unique results folder.
-EXPERIMENT_VERSION = "iter-7-cs15-replicate-rs42"
+EXPERIMENT_VERSION = "iter-8-cs15-train-instance-norm-rs42"
 
 # --- 3. SET DATA CREATION PARAMETERS ---
 # These parameters define the dataset that will be generated.
@@ -112,21 +112,13 @@ NORM_CONSTANTS = {
 #     'optimizer': 'Adam',
 # }
 # HARDYBOARD
-# INITIAL_PARAMS = {
-#     'lr': 0.001,
-#     'weight_decay': 0.0001,
-#     'dropout_rate': 0.3,
-#     'lstm_hidden_size': 256, # This was already correct
-#     'lstm_layers': 3,
-#     'optimizer': 'AdamW' # This was already correct
-# }
-INITIAL_PARAMS = {
-    'lr': 0.009270324105696693,
-    'weight_decay': 1.4930630699886896e-05,
-    'dropout_rate': 0.20339417432006618,
-    'lstm_hidden_size': 256,
-    'lstm_layers': 1,
-    'optimizer': 'AdamW',
+INITIAL_PARAMS = { #maksysm hyperparams
+    'lr': 0.001,
+    'weight_decay': 0.0001,
+    'dropout_rate': 0.3,
+    'lstm_hidden_size': 256, 
+    'lstm_layers': 3,
+    'optimizer': 'AdamW'
 }
 
 

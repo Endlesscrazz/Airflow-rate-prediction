@@ -1,11 +1,11 @@
 # src_cnn_v2/create_cnn_dataset_v2.py
 """
-Prepares a V2 dataset for the bottom-up CNN approach. (VERSION 5 - FINAL)
-
+Prepares a V2 dataset for the bottom-up CNN approach. (VERSION 6 - FINAL)
 - Reads pre-generated coordinate .json files to find leak epicenters.
-- Creates fixed-size .npy crops.
+- Creates fixed-size .npy crops with RAW thermal values.
 - Implements a "Clean Replay" strategy for robust training data balance.
 - Creates configurable augmentations (geometric + noise) for the training set.
+- Correctly counts and logs created vs. skipped files.
 """
 import os
 import sys
@@ -41,6 +41,7 @@ def crop_sequence(frames, center_x, center_y, crop_size):
 def process_split(df_split, is_training_set, output_dir, debug=False):
     all_metadata_rows = []
     failed_samples = []
+    counts = {'created': 0, 'skipped': 0}
     desc = "Processing " + ("Training" if is_training_set else "Test/Validation") + " Samples"
     
     iterator = df_split.iterrows()
@@ -60,8 +61,10 @@ def process_split(df_split, is_training_set, output_dir, debug=False):
 
             cropped_sequence = None
 
-            if not os.path.exists(original_filepath):
-                # --- This is the slow part, only run if the file is missing ---
+            if os.path.exists(original_filepath):
+                counts['skipped'] += 1
+            else:
+                counts['created'] += 1
                 mat_filepath, found_config_key = (None, None)
                 for d_key, d_conf in cfg.DATASET_CONFIGS.items():
                     video_search_pattern = os.path.join(cfg.RAW_DATASET_PARENT_DIR, d_conf["dataset_subfolder"], '**', f"{video_id}.mat")
@@ -71,9 +74,7 @@ def process_split(df_split, is_training_set, output_dir, debug=False):
                         break
                 if not mat_filepath: raise FileNotFoundError(f".mat file not found for video_id '{video_id}'")
                 
-                # --- NEW LOGIC: READS COORDINATES FROM JSON ---
                 coord_subfolder = cfg.DATASET_CONFIGS[found_config_key]["dataset_subfolder"]
-                # RAW_MASK_PARENT_DIR now points to the output of find_leaking_holes.py
                 coord_search_pattern = os.path.join(cfg.RAW_MASK_PARENT_DIR, coord_subfolder, '**', video_id)
                 coord_dir_results = glob.glob(coord_search_pattern, recursive=True)
                 coord_dir_path = next((path for path in coord_dir_results if os.path.isdir(path)), None)
@@ -90,9 +91,7 @@ def process_split(df_split, is_training_set, output_dir, debug=False):
                 if target_leak_data is None:
                     raise ValueError(f"Hole ID '{numeric_hole_id}' not found in coordinates file: {coord_path}")
 
-                center_x = target_leak_data['center_x']
-                center_y = target_leak_data['center_y']
-                # --- END OF NEW LOGIC ---
+                center_x, center_y = target_leak_data['center_x'], target_leak_data['center_y']
                 
                 frames = scipy.io.loadmat(mat_filepath).get('TempFrames').astype(np.float32)
                 
@@ -106,13 +105,6 @@ def process_split(df_split, is_training_set, output_dir, debug=False):
                     raise ValueError(f"Cropped shape is incorrect: {cropped_frames.shape[:2]}")
                 
                 cropped_sequence = cropped_frames.transpose(2, 0, 1)
-
-                # --- ADD INSTANCE-WISE NORMALIZATION ---
-                seq_max = np.max(cropped_sequence)
-                if seq_max > 1e-6: # Avoid division by zero
-                    cropped_sequence = cropped_sequence / seq_max
-                # --- END ---
-
                 np.save(original_filepath, cropped_sequence)
 
             base_record = {
@@ -123,9 +115,8 @@ def process_split(df_split, is_training_set, output_dir, debug=False):
             if is_training_set:
                 replay_factor = max(1, cfg.V2_DATASET_PARAMS["NUM_AUGMENTATIONS"] // 9)
                 for i in range(replay_factor):
-                    replay_sample_id = f"{sample_id}_orig_replay_{i}"
                     all_metadata_rows.append({
-                        'sample_id': replay_sample_id,
+                        'sample_id': f"{sample_id}_orig_replay_{i}",
                         'image_path': original_filename,
                         **base_record
                     })
@@ -135,30 +126,28 @@ def process_split(df_split, is_training_set, output_dir, debug=False):
 
                 aug_params = cfg.V2_DATASET_PARAMS.get("AUGMENTATION_PARAMS", {})
                 for i in range(cfg.V2_DATASET_PARAMS["NUM_AUGMENTATIONS"]):
-                    aug_sample_id = f"{sample_id}_aug_{i+1}"
-                    aug_filename = f"{aug_sample_id}.npy"
+                    aug_filename = f"{sample_id}_aug_{i+1}.npy"
                     aug_filepath = os.path.join(output_dir, aug_filename)
                     
-                    if not os.path.exists(aug_filepath):
+                    if os.path.exists(aug_filepath):
+                        counts['skipped'] += 1
+                    else:
+                        counts['created'] += 1
                         augmented_sequence = cropped_sequence.copy()
-                        
                         if cfg.V2_DATASET_PARAMS.get("ENABLE_GEOMETRIC_AUGMENTATION", False):
                             augmented_sequence = augment_geometric(
                                 augmented_sequence,
                                 rotation_degrees=aug_params.get("ROTATION_DEGREES", 10),
                                 translation_frac=aug_params.get("TRANSLATION_FRAC", 0.1)
                             )
-                        
                         augmented_sequence = add_gaussian_noise(
                             augmented_sequence, 
                             noise_level=aug_params.get("NOISE_LEVEL", 0.05)
                         )
-                        # based on maksysm code
-                        augmented_sequence = np.clip(augmented_sequence, 0.0, 1.0)
                         np.save(aug_filepath, augmented_sequence)
                     
                     all_metadata_rows.append({
-                        'sample_id': aug_sample_id,
+                        'sample_id': f"{sample_id}_aug_{i+1}",
                         'image_path': aug_filename,
                         **base_record
                     })
@@ -176,55 +165,59 @@ def process_split(df_split, is_training_set, output_dir, debug=False):
                 sys.exit(1)
             failed_samples.append({'sample_id': master_row.get('sample_id', 'N/A'), 'error': str(e)})
             continue
-    return all_metadata_rows, failed_samples
+            
+    print(f"  - Split processing complete. Created: {counts['created']} new .npy files, Skipped: {counts['skipped']} existing files.")
+    return all_metadata_rows, failed_samples, counts
 
 def main():
     parser = argparse.ArgumentParser(description="V2 Dataset Creation Script.")
-    parser.add_argument("--debug", action='store_true', help="Enable debug mode to stop on first error.")
+    parser.add_argument("--debug", action='store_true', help="Enable debug mode to stop on first error and get verbose logs.")
     args = parser.parse_args()
+
     random.seed(cfg.RANDOM_STATE)
     np.random.seed(cfg.RANDOM_STATE)
     output_dir = cfg.DATASET_DIR
     os.makedirs(output_dir, exist_ok=True)
+
     print("--- Starting V2 Dataset Creation (Cropped & Augmented) ---")
-    print(f"Output directory: {output_dir}")
+    print(f"  - Using data split from random seed: {cfg.RANDOM_STATE}")
+    print(f"  - Output directory for .npy files: {output_dir}")
+
     try:
         train_df = pd.read_csv(cfg.TRAIN_SPLIT_PATH)
         val_df = pd.read_csv(cfg.VAL_SPLIT_PATH)
         test_df = pd.read_csv(cfg.TEST_SPLIT_PATH)
     except FileNotFoundError:
-        sys.exit(f"FATAL: Split files not found. Please run 'split_data_v2.py' first.")
-    train_metadata, train_fails = process_split(train_df, is_training_set=True, output_dir=output_dir, debug=args.debug)
-    val_metadata, val_fails = process_split(val_df, is_training_set=False, output_dir=output_dir, debug=args.debug)
-    test_metadata, test_fails = process_split(test_df, is_training_set=False, output_dir=output_dir, debug=args.debug)
-    
+        sys.exit(f"FATAL: Split files for seed {cfg.RANDOM_STATE} not found. Please run 'split_data_v2.py' first.")
+
+    train_metadata, train_fails, train_counts = process_split(train_df, is_training_set=True, output_dir=output_dir, debug=args.debug)
+    val_metadata, val_fails, val_counts = process_split(val_df, is_training_set=False, output_dir=output_dir, debug=args.debug)
+    test_metadata, test_fails, test_counts = process_split(test_df, is_training_set=False, output_dir=output_dir, debug=args.debug)
+    failed_samples = train_fails + val_fails + test_fails
+
     if not (train_metadata or val_metadata or test_metadata):
-        print("\nFATAL: No metadata was generated. Check for errors.")
-        return
-        
+        print("\nFATAL: No metadata was generated. Check for errors."); return
+
     df_meta_train = pd.DataFrame(train_metadata)
     df_meta_val = pd.DataFrame(val_metadata)
     df_meta_test = pd.DataFrame(test_metadata)
+
     df_meta_train.to_csv(cfg.TRAIN_METADATA_PATH, index=False)
     df_meta_val.to_csv(cfg.VAL_METADATA_PATH, index=False)
     df_meta_test.to_csv(cfg.TEST_METADATA_PATH, index=False)
 
     print(f"\nSuccessfully created V2 dataset.")
-    print(
-        f"  Training samples created: {len(df_meta_train)} (including augmentations)")
-    print(f"  Validation samples created: {len(df_meta_val)}")
-    print(f"  Test samples created: {len(df_meta_test)}")
-    print(f"  Metadata saved to '{output_dir}'")
+    print(f"  - Training samples created: {len(df_meta_train)}")
+    print(f"  - Validation samples created: {len(df_meta_val)}")
+    print(f"  - Test samples created: {len(df_meta_test)}")
+    print(f"  - Metadata saved to versioned files (e.g., {os.path.basename(cfg.TRAIN_METADATA_PATH)})")
 
-    # --- NEW: LOG EXPERIMENT PARAMETERS ---
-    log_filepath = os.path.join(
-        cfg.EXPERIMENT_RESULTS_DIR, "experiment_summary.txt")
+    log_filepath = os.path.join(cfg.EXPERIMENT_RESULTS_DIR, "experiment_summary.txt")
     os.makedirs(cfg.EXPERIMENT_RESULTS_DIR, exist_ok=True)
-
     data_creation_params = {
         "Experiment Name": cfg.EXPERIMENT_NAME,
         "Source Ground Truth CSV": os.path.basename(cfg.GROUND_TRUTH_CSV_PATH),
-        "V2 Dataset Parameters": cfg.V2_DATASET_PARAMS,
+        "V2 Dataset Parameters": {k: v for k, v in cfg.V2_DATASET_PARAMS.items() if k != "OUTPUT_SUBDIR"},
         "Frames Per Sample": cfg.NUM_FRAMES_PER_SAMPLE,
         "Focus Duration (seconds)": cfg.FOCUS_DURATION_SECONDS,
         "Final Train Samples (with augmentations)": len(df_meta_train),
@@ -233,13 +226,22 @@ def main():
         "Original Train Samples": len(train_df),
         "Original Validation Samples": len(val_df),
         "Original Test Samples": len(test_df),
+        "File Generation Summary": {
+            "Training Set": train_counts,
+            "Validation Set": val_counts,
+            "Test Set": test_counts,
+            "Total Created": train_counts['created'] + val_counts['created'] + test_counts['created'],
+            "Total Skipped": train_counts['skipped'] + val_counts['skipped'] + test_counts['skipped']
+        }
     }
+    log_experiment_details(log_filepath, "Data Creation Parameters", data_creation_params)
 
-    log_experiment_details(
-        log_filepath, "Data Creation Parameters", data_creation_params)
-
+    if failed_samples:
+        print(f"\nWarning: {len(failed_samples)} original samples failed during processing.")
+        for i, failed in enumerate(failed_samples[:5]):
+            print(f"  - Sample ID: '{failed['sample_id']}', Reason: {failed['error']}")
 
 if __name__ == "__main__":
     main()
 
-# python src_cnn_v2/create_cnn_dataset_v2.py
+# python src_cnn_v2/create_cnn_dataset_v2.py --debug

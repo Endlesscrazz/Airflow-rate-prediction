@@ -1,5 +1,5 @@
 --- DATA SPLITTING DETAILS ---
-Timestamp: 2025-10-28 19:31:26
+Timestamp: 2025-11-01 20:53:54
 
 Splitting Strategy: Colleague's Voltage-Based Grouping
 Random Seed: 42
@@ -57,13 +57,12 @@ Split Counts:
 ==================================================
 
 --- DATA CREATION PARAMETERS ---
-Timestamp: 2025-10-28 19:35:15
+Timestamp: 2025-11-01 20:55:45
 
 Experiment Name: hardyboard_all_dataset_v2
 Source Ground Truth CSV: airflow_ground_truth_hardyboard_all.csv
 V2 Dataset Parameters:
 {
-    "OUTPUT_SUBDIR": "dataset_cs15_nf150_aug100",
     "CROP_SIZE": 15,
     "NUM_AUGMENTATIONS": 100,
     "ENABLE_GEOMETRIC_AUGMENTATION": false,
@@ -82,39 +81,57 @@ Final Test Samples: 22
 Original Train Samples: 64
 Original Validation Samples: 23
 Original Test Samples: 22
+File Generation Summary:
+{
+    "Training Set": {
+        "created": 2900,
+        "skipped": 3564
+    },
+    "Validation Set": {
+        "created": 0,
+        "skipped": 23
+    },
+    "Test Set": {
+        "created": 0,
+        "skipped": 22
+    },
+    "Total Created": 2900,
+    "Total Skipped": 3609
+}
+
 
 ==================================================
 
 --- FINAL MODEL TRAINING PARAMETERS ---
-Timestamp: 2025-10-28 19:42:48
+Timestamp: 2025-11-01 21:18:12
 
 Experiment Name: hardyboard_all_dataset_v2
 Batch Size: 16
-Number of Epochs Run: 29
-Best Model Found at Epoch: 4
-Best Validation MAE: 0.18494245409965515
+Number of Epochs Run: 55
+Best Model Found at Epoch: 30
+Best Validation MAE: 0.1734023541212082
 Final Hyperparameters Used:
 {
-    "lr": 9.6681665526918e-05,
-    "weight_decay": 1.0347688244846932e-06,
-    "dropout_rate": 0.2601194262689661,
-    "lstm_hidden_size": 64,
+    "lr": 0.001,
+    "weight_decay": 0.0001,
+    "dropout_rate": 0.3,
+    "lstm_hidden_size": 256,
     "lstm_layers": 3,
-    "optimizer": "Adam"
+    "optimizer": "AdamW"
 }
 
 
 ==================================================
 
 --- FINAL TEST SET PERFORMANCE ---
-Timestamp: 2025-10-28 19:47:22
+Timestamp: 2025-11-01 21:21:57
 
-R-squared (R²): 0.1815277409544127
-Mean Absolute Error (MAE): 0.24899464554526585
-Root Mean Squared Error (RMSE): 0.36430657263312693
-Mean Absolute Percentage Error (MAPE): 28.236900345664154
+R-squared (R²): 0.5298113561421818
+Mean Absolute Error (MAE): 0.18584793399832467
+Root Mean Squared Error (RMSE): 0.2761220521236361
+Mean Absolute Percentage Error (MAPE): 23.42180504848285
 Accuracy @ 10%: 22.727272727272727
-Accuracy @ 25%: 54.54545454545454
+Accuracy @ 25%: 72.72727272727273
 
 ==================================================
 
