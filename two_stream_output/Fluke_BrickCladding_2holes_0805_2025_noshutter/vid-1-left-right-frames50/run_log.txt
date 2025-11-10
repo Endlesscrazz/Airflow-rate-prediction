@@ -1,0 +1,26 @@
+--- Leak Detection POC Execution Log ---
+
+--- Run Parameters ---
+analysis_window_frames   : 50
+gpu_accelerated          : False
+live_preview             : True
+num_leaks                : 2
+output_dir               : two_stream_output/Fluke_BrickCladding_2holes_0805_2025_noshutter/vid-1-left-right-frames50
+shift1_frame             : 75
+shift1_x                 : -5.0
+shift1_y                 : 0.0
+shift2_frame             : 150
+shift2_x                 : 10.0
+shift2_y                 : 0.0
+video_path               : /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0805_2025_noshutter/T1.6V_2025-08-05-19-57-24_20_34_14_.mat
+
+--- Performance Metrics ---
+Total Execution Time     : 18.13s
+Fast Path Loop Time      : 2.69s
+Slow Path Analysis Time  : 13.66s
+
+--- Leak Detection Results ---
+Safe Crop Window (HxW): 478x618
+Found 2 leak(s):
+  - Leak #1: Coords=(np.int64(271), np.int64(329)) (in cropped frame), Score=0.032014
+  - Leak #2: Coords=(np.int64(358), np.int64(142)) (in cropped frame), Score=0.008563

@@ -14,7 +14,6 @@ import cv2
 import imageio.v2 as imageio
 
 # --- Core Functions ---
-
 def add_gradual_shake(frames, args):
     H, W, T = frames.shape
     shaky_frames = np.zeros_like(frames)
@@ -56,7 +55,6 @@ def stabilize_video_phase_correlation(shaky_frames):
     return stabilized_frames
 
 # --- Visualization Functions ---
-
 def normalize_for_gif(frame, vmin, vmax):
     clipped_frame = np.clip(frame, vmin, vmax)
     frame_8bit = cv2.normalize(clipped_frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
@@ -105,7 +103,6 @@ def main():
 
     print("\n--- Generating Visualizations ---")
     
-    # --- START OF FIX ---
     # 1. Calculate the robust, global contrast limits ONCE from the original video
     vmin = np.percentile(original_frames, 1)
     vmax = np.percentile(original_frames, 99)
@@ -131,7 +128,6 @@ def main():
                           "1. Original", "2. Stabilized", 
                           (0, 255, 0), (255, 255, 0), 
                           vmin, vmax, gif3_path)
-    # --- END OF FIX ---
 
     print("\n--- POC Finished Successfully ---")
 
@@ -150,6 +146,8 @@ python src_cnn_v2/poc_stabilization.py \
   --output_dir "stabilization_poc_output/Fluke_BrickCladding_2holes_0616_2025_noshutter/vid-1-left-top-shake-stabilized" \
   --num_frames 150 \
   --shift1_frame 75 --shift1_x -5 \
+  --shift2_frame 150 --shift2_x 10 \
+  --shift1_frame 75 --shift1_y -5 \
   --shift2_frame 150 --shift2_x 10 
 
 

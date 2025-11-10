@@ -34,6 +34,7 @@ CNN_dataset/
 output_SAM/
 stabilization_poc_output/
 debug_stabilized_outputs/
+realtime_poc_outputs/
 
 # --- Large Model Checkpoints ---
 SAM/
