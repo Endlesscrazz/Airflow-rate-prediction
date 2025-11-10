@@ -32,9 +32,11 @@ masks_raw/
 CNN_dataset/
 
 output_SAM/
+debug_outputs/
 stabilization_poc_output/
 debug_stabilized_outputs/
 realtime_poc_outputs/
+two_stream_output/
 
 # --- Large Model Checkpoints ---
 SAM/
