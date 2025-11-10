@@ -219,6 +219,15 @@ def main():
 if __name__ == "__main__":
     main()
 """
+# Sameem 11-holes brickcladding
+python src_cnn_v2/debug_files/debug_leak_finder.py \
+  --video_path "/Users/shreyas/Downloads/Fluke_Brickcladding_10112025_11holes_noshutter_Sameem/T15P_2025-11-10-10-11-50_23_29_6_.mat" \
+  --output_dir "debug_outputs/Fluke_Brickcladding_10112025_11holes_noshutter_Sameem/vid-1" \
+  --crop_size 16 \
+  --num_leaks 11 \
+  --regressor theilsen 
+
+
 # Brickcladding-CHPC
 python src_cnn_v2/debug_files/debug_leak_finder.py \
   --video_path "/scratch/general/vast/u1527145/datasets/Fluke_BrickCladding_2holes_0805_2025_noshutter/T1.6V_2025-08-05-19-57-24_20_34_14_.mat" \
