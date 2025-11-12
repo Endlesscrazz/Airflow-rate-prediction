@@ -416,20 +416,30 @@ def main():
                 0.2 * display_activity_map) + (0.8 * new_activity_map)
 
         if args.live_preview:
+            # Create a full-size black canvas every time
+            full_canvas = np.zeros((H, W, 3), dtype=np.uint8)
+            
+            # Perform analysis on the cropped part
             cropped_map_for_display = display_activity_map[y_start:y_end, x_start:x_end]
-            activity_display = np.zeros(
-                (cropped_map_for_display.shape[0], cropped_map_for_display.shape[1], 3), dtype=np.uint8)
+            
             if cropped_map_for_display.max() > 0:
                 map_enhanced = cropped_map_for_display ** 1.5
                 map_norm = cv2.normalize(
                     map_enhanced, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-                activity_display = cv2.applyColorMap(
-                    map_norm, cv2.COLORMAP_HOT)
-            cv2.putText(activity_display, f"Frame: {i+1}/{T}", (10, 30),
+                heatmap_display = cv2.applyColorMap(map_norm, cv2.COLORMAP_HOT)
+                
+                # Paste the dynamically-sized heatmap onto the full-size canvas
+                full_canvas[y_start:y_end, x_start:x_end] = heatmap_display
+
+            # All drawing and showing is done on the full_canvas
+            cv2.putText(full_canvas, f"Frame: {i+1}/{T}", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-            cv2.imshow("Live Activity Map (Fast Path)", activity_display)
+            cv2.imshow("Live Activity Map (Fast Path)", full_canvas)
+            
+            # Append the full_canvas, which always has a constant size
             live_preview_frames_history.append(
-                cv2.cvtColor(activity_display, cv2.COLOR_BGR2RGB))
+                cv2.cvtColor(full_canvas, cv2.COLOR_BGR2RGB))
+            
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 slow_path_thread.stop()
                 break
@@ -504,11 +514,11 @@ python src_cnn_v2/poc_two_stream_real_time_detection.py \
 ## LOCAL MACBOOK
 python src_cnn_v2/poc_two_stream_real_time_detection.py \
     --video_path "/Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_08132025_2holes_noshutter/T1.4V_2025-08-14-15-47-12_21_34_13_.mat" \
-    --output_dir "two_stream_output/Fluke_HardyBoard_08132025_2holes_noshutter/vid-1-circular" \
+    --output_dir "two_stream_output/Fluke_HardyBoard_08132025_2holes_noshutter/vid-1-left-right-f150" \
     --num_leaks 2 \
     --analysis_window_frames 75 \
-    --shift1_frame 25 --shift1_x -5 --shift1_y -10 \
-    --shift2_frame 50 --shift2_x 10 --shift2_y 20 \
+    --shift1_frame 75 --shift1_x -5 --shift1_y 0 \
+    --shift2_frame 150 --shift2_x 10 --shift2_y 0 \
     --compare \
     --live_preview
 
@@ -525,10 +535,13 @@ python src_cnn_v2/poc_two_stream_real_time_detection.py \
 # Brickcladding
 python src_cnn_v2/poc_two_stream_real_time_detection.py \
     --video_path "/Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_BrickCladding_2holes_0805_2025_noshutter/T1.6V_2025-08-05-19-57-24_20_34_14_.mat" \
-    --output_dir "two_stream_output/Fluke_BrickCladding_2holes_0805_2025_noshutter/vid-1-left-right-frames50" \
+    --output_dir "two_stream_output/Fluke_BrickCladding_2holes_0805_2025_noshutter/vid-1-circular-f150" \
     --num_leaks 2 \
-    --shift1_frame 75 --shift1_x -5 --shift1_y 0 \
-    --shift2_frame 150 --shift2_x 10 --shift2_y 0 \
-    --analysis_window_frames 50 \
+    --shift1_frame 75 --shift1_x -5 --shift1_y -10 \
+    --shift2_frame 150 --shift2_x 10 --shift2_y 5 \
+    --analysis_window_frames 150 \
+    --compare \
     --live_preview
+
+    
 """
