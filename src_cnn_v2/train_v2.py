@@ -177,7 +177,9 @@ def main():
         dropout=cfg.INITIAL_PARAMS['dropout_rate']
     ).to(cfg.DEVICE)
 
-    criterion = lambda preds, targets: asymmetric_loss(preds, targets, over_prediction_penalty=1.8)
+    # Configure overpred weight
+    over_pred_penalty = 1.7   #hardyboard
+    criterion = lambda preds, targets: asymmetric_loss(preds, targets, over_prediction_penalty=over_pred_penalty)
 
     optimizer_name = cfg.INITIAL_PARAMS.get('optimizer', 'AdamW')
     if optimizer_name.lower() == 'adam':
@@ -190,7 +192,7 @@ def main():
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=10)
     
     # Initialize the GradScaler for mixed-precision training
-    scaler_amp = torch.cuda.amp.GradScaler()
+    scaler_amp = torch.amp.GradScaler('cuda')
 
     # --- Training Loop ---
     history = []
@@ -235,6 +237,7 @@ def main():
     final_training_params = {
         "Experiment Name": cfg.EXPERIMENT_NAME,
         "Batch Size": cfg.BATCH_SIZE,
+        "Over-pred-penalt": over_pred_penalty,
         "Number of Epochs Run": len(history_df),
         "Best Model Found at Epoch": history_df['val_mae'].idxmin() + 1,
         "Best Validation MAE": best_val_mae,

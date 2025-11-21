@@ -54,7 +54,6 @@ def split_counts(n: int):
     if n == 1:
         return [1, 0, 0]
     return [0, 0, 0]
-# --- END of replication ---
 
 def main():
     print("--- Splitting Data using Colleague's EXACT Voltage-Based Methodology ---")
@@ -148,7 +147,6 @@ def main():
     }
     
     log_experiment_details(log_filepath, "Data Splitting Details", split_summary)
-    # --- END OF LOGGING BLOCK ---
 
     # --- Save the splits --
     train_df.to_csv(cfg.TRAIN_SPLIT_PATH, index=False)

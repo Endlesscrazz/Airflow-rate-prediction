@@ -15,7 +15,7 @@ EXPERIMENT_NAME = "hardyboard_all_dataset_v2"
 
 # --- 2. SET THE EXPERIMENT VERSION ---
 # Change this for each new run to create a unique results folder.
-EXPERIMENT_VERSION = "iter-8-cs15-hp-tuned-instance-norm-rs42"
+EXPERIMENT_VERSION = "iter-13-cs15-hp-tuned-overpred-1.7-rs42"
 
 # --- 3. SET DATA CREATION PARAMETERS ---
 # These parameters define the dataset that will be generated.
@@ -81,7 +81,7 @@ SAVE_SCALERS = True
 MAX_FLOW_RATES = {
     "gypsum_all_dataset_v2": 1.3,
     "gypsum_10_hole_dataset_v2": 4.6,
-    "brickcladding_all_dataset_v2": 1.6,
+    "brickcladding_all_dataset_v2": 1.5686,
     "hardyboard_all_dataset_v2": 1.58645,
 }
 MAX_FLOW_RATE = MAX_FLOW_RATES.get(EXPERIMENT_NAME, 5.0)
@@ -103,14 +103,15 @@ NORM_CONSTANTS = {
 #     'optimizer': 'Adam',
 # }
 # BRICKCLADDING ALL
-# INITIAL_PARAMS = {
-#     'lr': 0.00012578935386695162,
-#     'weight_decay': 3.3668458829765327e-06,
-#     'dropout_rate': 0.3221973421324753,
-#     'lstm_hidden_size': 256,
-#     'lstm_layers': 2,
-#     'optimizer': 'Adam',
-# }
+INITIAL_PARAMS = {  #hyperparam tuned
+    "lr": 0.00010386262010394423,
+    "weight_decay": 3.0503844758115838e-05,
+    "dropout_rate": 0.297074888861393,
+    "lstm_hidden_size": 256,
+    "lstm_layers": 2,
+    "optimizer": "AdamW"
+}
+
 # HARDYBOARD
 # INITIAL_PARAMS = { #maksysm hyperparams
 #     'lr': 0.001,
@@ -121,12 +122,12 @@ NORM_CONSTANTS = {
 #     'optimizer': 'AdamW'
 # }
 INITIAL_PARAMS = {  # tuned hyperparams
-    'lr': 4.528800820609468e-05,
-    'weight_decay': 9.093332052026252e-07,
-    'dropout_rate': 0.2822039808933038,
-    'lstm_hidden_size': 64,
-    'lstm_layers': 2,
-    'optimizer': 'Adam',
+    'lr': 9.365848987187114e-05,
+    'weight_decay': 2.6103804428607636e-05,
+    'dropout_rate': 0.11326216866883788,
+    'lstm_hidden_size': 128,
+    'lstm_layers': 1,
+    'optimizer': 'AdamW',
 }
 
 
