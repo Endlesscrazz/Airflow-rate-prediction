@@ -38,8 +38,19 @@ POSITIONAL_ANCHORS = {
     "0808": {
         "1": np.array([269, 327]), # center hole
         "2": np.array([358, 142])  # Corrected bottom_left hole
-    }
-    
+    },
+    # "10holes": { 
+    #     "1": np.array([227, 145]),  # vertical slit
+    #     "2": np.array([71, 203]),
+    #     "3": np.array([46, 368]),
+    #     "4": np.array([71, 527]),
+    #     "5": np.array([205, 490]),
+    #     "6": np.array([198, 354]),
+    #     "7": np.array([318, 400]),
+    #     "8": np.array([313, 255]),
+    #     "9": np.array([323, 553]),
+    #     "10": np.array([415, 351])  # horizontal slit
+    # }
 }
 
 # --- Core Logic Functions ---
@@ -228,4 +239,11 @@ python -m src_cnn_v2.find_leaking_holes \
     --num_leaks 2 \
     --debug
 
+# GYPSUM 10 Hole
+python -m src_cnn_v2.find_leaking_holes \
+    --dataset_dir /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_Gypsum_09032025_10holes_noshutter_Sameem \
+    --base_output_dir Output_SAM/datasets/Fluke_Gypsum_09032025_10holes_noshutter_No-anchor \
+    --num_leaks 10 \
+    --debug
+    
 """
