@@ -27,6 +27,36 @@ except ImportError:
     TORCH_AVAILABLE = False
 
 # --- Core Helper Functions ---
+def add_sensor_noise(frames, noise_level):
+    """Adds Gaussian noise to the video frames to simulate sensor noise."""
+    print(f"--- Adding sensor noise with standard deviation: {noise_level} ---")
+    # Generate noise with the same shape as the frames, mean=0
+    noise = np.random.normal(loc=0.0, scale=noise_level, size=frames.shape)
+    noisy_frames = frames + noise
+    return noisy_frames
+
+def apply_temporal_smoothing(frames, window_size):
+    """
+    Applies a simple moving average over the time axis to reduce noise.
+    """
+    if window_size < 2:
+        return frames
+    
+    print(f"\n--- (Slow Path) Applying temporal smoothing with a {window_size}-frame window... ---")
+    H, W, T = frames.shape
+    smoothed_frames = np.zeros_like(frames)
+    
+    # Use a cumulative sum for an efficient moving average calculation
+    cumsum = np.cumsum(frames, axis=2, dtype=np.float64)
+    
+    # First window_size frames are a growing average
+    for i in range(window_size):
+        smoothed_frames[:, :, i] = cumsum[:, :, i] / (i + 1)
+        
+    # The rest are a sliding window average
+    smoothed_frames[:, :, window_size:] = (cumsum[:, :, window_size:] - cumsum[:, :, :-window_size]) / window_size
+    
+    return smoothed_frames.astype(np.float64)
 
 
 def add_gradual_shake(frames, args):
@@ -162,7 +192,7 @@ class OnlineOLSCalculator:
 
 
 class SlowPathAnalyzer(threading.Thread):
-    def __init__(self, num_leaks, analysis_interval_frames, regressor, use_gpu, compare_mode):
+    def __init__(self, num_leaks, analysis_interval_frames, regressor, use_gpu, compare_mode, smoothing_window):
         super().__init__()
         self.daemon = True
         self.frame_buffer = deque()
@@ -171,6 +201,7 @@ class SlowPathAnalyzer(threading.Thread):
         self.regressor = regressor
         self.use_gpu = use_gpu
         self.compare_mode = compare_mode
+        self.smoothing_window = smoothing_window
         self.results = {}
         self._stop_event = threading.Event()
 
@@ -251,13 +282,11 @@ class SlowPathAnalyzer(threading.Thread):
         self.crop_dims = cropped_frames_np.shape[:2]
 
         if self.compare_mode:
-            self.results['theilsen'] = self._run_analysis(
-                cropped_frames_np, 'theilsen')
-            self.results['huber'] = self._run_analysis(
-                cropped_frames_np, 'huber')
+            # <--- MODIFIED: Pass the original cropped frames, not smoothed ones ---
+            self.results['theilsen'] = self._run_analysis(cropped_frames_np, 'theilsen')
+            self.results['huber'] = self._run_analysis(cropped_frames_np, 'huber')
         else:
-            self.results[self.regressor] = self._run_analysis(
-                cropped_frames_np, self.regressor)
+            self.results[self.regressor] = self._run_analysis(cropped_frames_np, self.regressor)
 
     def stop(self): self._stop_event.set()
 
@@ -345,6 +374,10 @@ def main():
     parser.add_argument("--shift2_frame", type=int, default=150)
     parser.add_argument("--shift2_x", type=float, default=10.0)
     parser.add_argument("--shift2_y", type=float, default=0.0)
+    parser.add_argument("--noise_level", type=float, default=0.0, help="Standard deviation of Gaussian noise to add to the video.")
+    parser.add_argument("--temporal_smoothing_window", type=int, default=1, help="Size of the moving average window for noise reduction (1=off, 3 is a good start).")
+    parser.add_argument("--save_smoothed_preview", action='store_true', help="Save a GIF comparing the original noisy frames to the smoothed frames.")
+
     args = parser.parse_args()
 
     total_start_time = time.perf_counter()
@@ -363,6 +396,16 @@ def main():
     except Exception as e:
         sys.exit(f"FATAL: Could not load video file. Error: {e}")
 
+    frames_before_processing = np.copy(original_frames)
+
+    if args.noise_level > 0.0:
+        original_frames = add_sensor_noise(original_frames, args.noise_level)
+    
+    frames_after_noise = np.copy(original_frames)
+
+    if args.temporal_smoothing_window > 1:
+        original_frames = apply_temporal_smoothing(original_frames, args.temporal_smoothing_window)
+
     shaky_frames = add_gradual_shake(original_frames, args)
     reference_frame = original_frames[:, :, 0].astype(np.float32)
 
@@ -371,7 +414,7 @@ def main():
     # Real-time camera implementation, need to set maxlen to 100-150 frames
     transform_history = deque(maxlen=T)
     slow_path_thread = SlowPathAnalyzer(
-        args.num_leaks, T, args.regressor, args.gpu, args.compare)
+        args.num_leaks, T, args.regressor, args.gpu, args.compare, args.temporal_smoothing_window)
 
     stabilized_frames_history = []
     live_preview_frames_history = []
@@ -491,6 +534,22 @@ def main():
                             result['leaks'], final_map_path)
 
     write_log_file(args, timings, slow_path_thread)
+
+    if args.save_smoothed_preview and args.temporal_smoothing_window > 1:
+        print("\n--- Saving Noise vs. Smoothing Comparison Visualization ---")
+        # 'original_frames' now holds the smoothed data
+        # 'frames_after_noise' holds the data before smoothing
+        smoothed_gif_path = os.path.join(
+            args.output_dir, f"{base_filename}_smoothing_comparison.gif")
+        
+        # We can reuse the existing GIF creation function
+        create_comparison_gif(frames_after_noise, "1. Noisy",
+                              original_frames, "2. Smoothed",
+                              smoothed_gif_path, vmin, vmax, fps=15)
+
+    write_log_file(args, timings, slow_path_thread)
+    print("\n--- POC Finished Successfully ---")
+
     print("\n--- POC Finished Successfully ---")
 
 
@@ -514,22 +573,26 @@ python src_cnn_v2/poc_two_stream_real_time_detection.py \
 ## LOCAL MACBOOK
 python src_cnn_v2/poc_two_stream_real_time_detection.py \
     --video_path "/Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_HardyBoard_08132025_2holes_noshutter/T1.4V_2025-08-14-15-47-12_21_34_13_.mat" \
-    --output_dir "two_stream_output/Fluke_HardyBoard_08132025_2holes_noshutter/vid-1-left-right-f150" \
+    --output_dir "two_stream_output/Fluke_HardyBoard_08132025_2holes_noshutter/vid-1-left-right-f150-nl0.5-tempsmooth" \
     --num_leaks 2 \
-    --analysis_window_frames 75 \
+    --analysis_window_frames 150 \
     --shift1_frame 75 --shift1_x -5 --shift1_y 0 \
     --shift2_frame 150 --shift2_x 10 --shift2_y 0 \
-    --compare \
+    --noise_level 0.5 \
+    --temporal_smoothing_window 3 \
+    --save_smoothed_preview \
     --live_preview
 
 
 # Gypsum
 python src_cnn_v2/poc_two_stream_real_time_detection.py \
     --video_path "/Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_Gypsum_07162025_noshutter/T1.4V_2025-07-17-16-56-31_22_34_12_.mat" \
-    --output_dir "two_stream_output/Fluke_Gypsum_07162025_noshutter/vid-1-left-right" \
+    --output_dir "two_stream_output/Fluke_Gypsum_07162025_noshutter/vid-1-circular-f150-nl0.5" \
+    --analysis_window_frames 150 \
     --num_leaks 1 \
-    --shift1_frame 75 --shift1_x -5 --shift1_y 0 \
-    --shift2_frame 150 --shift2_x 10 --shift2_y 0 \
+    --shift1_frame 75 --shift1_x -5 --shift1_y -10 \
+    --shift2_frame 150 --shift2_x 10 --shift2_y 15 \
+    --noise_level 0.5 \
     --live_preview
 
 # Brickcladding
@@ -543,5 +606,5 @@ python src_cnn_v2/poc_two_stream_real_time_detection.py \
     --compare \
     --live_preview
 
-    
+
 """

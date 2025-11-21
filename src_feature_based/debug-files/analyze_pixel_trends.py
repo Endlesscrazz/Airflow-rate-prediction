@@ -215,6 +215,6 @@ python -m src_feature_based.debug-files.analyze_pixel_trends \
 
         
 python -m src_feature_based.debug-files.analyze_pixel_trends \
-    /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_Gypsum_09032025_10holes_noshutter/T5P_2025-10-7-11-38-40_35_23_12_.mat \
-    debug_ouputs/Fluke_Gypsum_09032025_10holes_noshutter/vid-1
+    /Volumes/One_Touch/Airflow-rate-prediction/datasets/Fluke_Gypsum_09032025_10holes_noshutter_Sameem/2P/temp_2025-10-28-12-20-18_23_35_12_.mat \
+    debug_ouputs/Fluke_Gypsum_09032025_10holes_noshutter_Sameem/vid-1
 """
