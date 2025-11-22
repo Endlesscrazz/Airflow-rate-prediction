@@ -27,12 +27,12 @@ conda activate "${CONDA_ENV_NAME}"
 mkdir -p logs
 
 echo "--- Starting Hyperparameter Search ---"
-echo "hardyboard-all-dataset"
+echo "brickcladding-all-dataset"
 
 # Run the search with 100 trials
 python src_cnn_v2/hyperparam_search_v2.py \
   --n_trials 100 \
-  --study_name "hardyboard-all-dataset-cs15-v2-tuning" \
-  --storage "sqlite:///optuna_hardyboard_v2.db"
+  --study_name "brickcladding-all-dataset-cs15-v2-tuning" \
+  --storage "sqlite:///optuna_brickcladding_v2.db"
 
 echo "--- Search Complete ---"

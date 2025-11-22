@@ -178,7 +178,7 @@ def main():
     ).to(cfg.DEVICE)
 
     # Configure overpred weight
-    over_pred_penalty = 1.7   #hardyboard
+    over_pred_penalty = 1.3   #hardyboard
     criterion = lambda preds, targets: asymmetric_loss(preds, targets, over_prediction_penalty=over_pred_penalty)
 
     optimizer_name = cfg.INITIAL_PARAMS.get('optimizer', 'AdamW')
