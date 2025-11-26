@@ -38,33 +38,20 @@ def parse_pressure_from_multi_hole_filename(filename: str) -> int:
 
 def main():
     # Configure this for the machine you are running on
-    DATASETS_ROOT = "/scratch/general/vast/u1527145/datasets"
+    # DATASETS_ROOT = "/scratch/general/vast/u1527145/datasets"
+
+    ## LOCAL Macbook
+    DATASETS_ROOT = "/Volumes/One_Touch/Airflow-rate-prediction/datasets"
     # The output file name should match what's in config_v2.py
-    OUTPUT_CSV_PATH = "airflow_ground_truth_hardyboard_all.csv"
+    OUTPUT_CSV_PATH = "airflow_ground_truth_gypsum_all.csv"
 
     DATASET_CONFIGS = {
         # New Gypsum
-        # "gypsum_0716": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07162025_noshutter", "structure_type": "new", "gt_file": "flow_rate.txt", "session": "gypsum_new"},
-        # "gypsum_0725": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07252025_noshutter", "structure_type": "new", "gt_file": "flow_rate.txt", "session": "gypsum_new"},
-        # "gypsum_0729": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07292025_noshutter", "structure_type": "new", "gt_file": "flow_rate.txt", "session": "gypsum_new"},
-        # # Old Gypsum
-        # "gypsum_0307": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_03072025", "structure_type": "old", "gt_file": "flow_rates.xlsx", "session": "gypsum_old"},
-        # "gypsum_0903_10holes": {
-        #     "material": "gypsum",
-        #     "dataset_subfolder": "Fluke_Gypsum_09032025_10holes_noshutter",
-        #     "structure_type": "multi_hole_csv",
-        #     "gt_file": "flow_rate.csv",
-        #     "session": "gypsum_10_hole"
-        # },
-        # "brick_cladding_0616": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0616_2025_noshutter", "structure_type": "new", "gt_file": "flowrate_data.txt", "session": "brick_cladding_all"},
-        # "brick_cladding_0805": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0805_2025_noshutter", "structure_type": "new", "gt_file": "flowrate_data.txt", "session": "brick_cladding_all"},
-        # "brick_cladding_0808": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0808_2025_noshutter", "structure_type": "new", "gt_file": "flowrate_data.txt", "session": "brick_cladding_all"},
-
-        # # New HardyBoard
-        "hardyboard_0813": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_08132025_2holes_noshutter", "structure_type": "new", "gt_file": "flow_rate_data.txt", "session": "hardyboard_new"},
-        #Old HardyBoard
-        "hardyboard_0313": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_03132025", "structure_type": "old", "gt_file": "flow_rate.txt", "session": "hardyboard_old"},
-
+        "gypsum_0716": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07162025_noshutter", "structure_type": "new", "gt_file": "flow_rate.txt", "session": "gypsum_new"},
+        "gypsum_0725": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07252025_noshutter", "structure_type": "new", "gt_file": "flow_rate.txt", "session": "gypsum_new"},
+        "gypsum_0729": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07292025_noshutter", "structure_type": "new", "gt_file": "flow_rate.txt", "session": "gypsum_new"},
+        # Old Gypsum
+        "gypsum_0307": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_03072025", "structure_type": "old", "gt_file": "flow_rates.xlsx", "session": "gypsum_old"},
     }
 
     all_records = []
@@ -83,10 +70,25 @@ def main():
         is_two_holes = "2holes" in config['dataset_subfolder'].lower()
 
         try:
-            if is_two_holes:
-                gt_df = pd.read_csv(gt_path, sep='\s+', header=None, skiprows=1, names=['V', 'Pa', 'rate_1', 'rate_2'])
-            else: # single hole
-                gt_df = pd.read_csv(gt_path, sep='\s+', header=None, skiprows=1, names=['V', 'Pa', 'rate_single'])
+            # --- MODIFICATION START: Handle .xlsx vs .txt/.csv ---
+            if gt_file.endswith('.xlsx'):
+                # Read Excel file
+                # Assuming the Excel file has headers and the columns are Voltage, Pressure, Flow Rate
+                gt_df = pd.read_excel(gt_path)
+                
+                # Standardize column names to match logic below
+                # We assume the first 3 columns correspond to V, Pa, rate_single
+                # Rename columns to standard internal names
+                gt_df = gt_df.iloc[:, :3] # Ensure we only take relevant columns
+                gt_df.columns = ['V', 'Pa', 'rate_single']
+                
+            else:
+                # Read Text/CSV file (Existing Logic)
+                if is_two_holes:
+                    gt_df = pd.read_csv(gt_path, sep='\s+', header=None, skiprows=1, names=['V', 'Pa', 'rate_1', 'rate_2'])
+                else: 
+                    gt_df = pd.read_csv(gt_path, sep='\s+', header=None, skiprows=1, names=['V', 'Pa', 'rate_single'])
+            # --- MODIFICATION END ---
             
             gt_df['V'] = gt_df['V'].astype(float)
             print(f"  - Successfully loaded ground truth from: {gt_file}")
@@ -103,16 +105,25 @@ def main():
             for filename in video_files:
                 video_id = filename.replace('.mat', '')
                 
+                # Try new naming convention first
                 voltage = parse_voltage_from_new_filename(filename)
+                delta_T = parse_delta_T_from_new_filename(filename)
+
+                # Fallback to old naming convention if new fails
                 if voltage is None:
                     voltage = parse_voltage_from_old_foldername(os.path.basename(subfolder_path))
+                
+                if delta_T is None:
+                    delta_T = parse_delta_T_from_old_filename(filename)
 
-                delta_T = parse_delta_T_from_new_filename(filename)
                 if voltage is None: 
                     print(f"  - WARNING: Could not parse voltage for '{filename}'. Skipping.")
                     continue
                 
-                gt_row = gt_df[gt_df['V'] == voltage]
+                # Find matching row in GT dataframe
+                # Using tolerance for float comparison just in case
+                gt_row = gt_df[np.isclose(gt_df['V'], voltage, atol=0.01)]
+                
                 if gt_row.empty: 
                     print(f"  - WARNING: No ground truth found for voltage {voltage} ('{filename}'). Skipping.")
                     continue
@@ -123,7 +134,6 @@ def main():
                 }
                 
                 if is_two_holes:
-                    # Use simple numeric IDs '1' and '2' to match the output of find_leaking_holes.py
                     all_records.append({'video_id': video_id, 'hole_id': '1', 'airflow_rate': gt_row.iloc[0]['rate_1'], **base_record})
                     all_records.append({'video_id': video_id, 'hole_id': '2', 'airflow_rate': gt_row.iloc[0]['rate_2'], **base_record})
                 else:
@@ -134,6 +144,7 @@ def main():
 
     if all_records:
         final_df = pd.DataFrame(all_records)
+        # Sort for cleanliness
         final_df = final_df.sort_values(by=['material', 'session', 'voltage', 'delta_T']).reset_index(drop=True)
         final_df.to_csv(OUTPUT_CSV_PATH, index=False)
         print(f"\nSuccessfully created combined ground truth file at: {OUTPUT_CSV_PATH}")
@@ -143,7 +154,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 # python scripts/create_ground_truth_labels.py
 

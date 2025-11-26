@@ -165,7 +165,9 @@ def main():
         dropout=cfg.INITIAL_PARAMS['dropout_rate']
     ).to(cfg.DEVICE)
 
-    over_pred_penalty = 2.5 #hp-tuned
+    #over_pred_penalty = 2.5 #hardybaord maksym
+    #over_pred_penalty = 2.1 #brickcladding maksym
+    over_pred_penalty = 1.7 #gypsum
     criterion = lambda preds, targets: asymmetric_loss(preds, targets, over_prediction_penalty=over_pred_penalty)
 
     optimizer = optim.AdamW(model.parameters(), lr=cfg.INITIAL_PARAMS['lr'], weight_decay=cfg.INITIAL_PARAMS['weight_decay'])

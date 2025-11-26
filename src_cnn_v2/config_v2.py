@@ -11,11 +11,11 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 RANDOM_STATE = 42
 
 # --- 1. SET THE EXPERIMENT NAME ---
-EXPERIMENT_NAME = "hardyboard_all_dataset_v2"
+EXPERIMENT_NAME = os.getenv("Target_Experiment", "gypsum_all_dataset_v2")
 
 # --- 2. SET THE EXPERIMENT VERSION ---
 # Change this for each new run to create a unique results folder.
-EXPERIMENT_VERSION = "iter-34-cs15-from-scratch-makysm-hp-overpred-2.5-rs42"
+EXPERIMENT_VERSION = "iter-7-cs15-overpred-1.7-rs42"
 
 # --- 3. SET DATA CREATION PARAMETERS ---
 # These parameters define the dataset that will be generated.
@@ -42,7 +42,7 @@ RAW_MASK_PARENT_DIR = '/scratch/general/vast/u1527145/Airflow-rate-prediction/Ou
 OUTPUT_DIR = os.path.join(DATA_DIR, EXPERIMENT_NAME)
 EXPERIMENT_RESULTS_DIR = os.path.join(RESULTS_DIR, EXPERIMENT_NAME, EXPERIMENT_VERSION)
 MASTER_METADATA_PATH = os.path.join(OUTPUT_DIR, "master_metadata_v2.csv")
-GROUND_TRUTH_CSV_PATH = os.path.join(PROJECT_ROOT, "airflow_ground_truth_hardyboard_all.csv")
+GROUND_TRUTH_CSV_PATH = os.path.join(PROJECT_ROOT, "airflow_ground_truth_gypsum_all.csv")
 
 # --- Versioned paths for SPLIT files ---
 TRAIN_SPLIT_PATH = os.path.join(OUTPUT_DIR, f"train_split_seed{RANDOM_STATE}.csv")
@@ -94,16 +94,16 @@ NORM_CONSTANTS = {
 
 # Tuned hyperparameters from Optuna search
 # GYPSUM ALL
-# INITIAL_PARAMS = {
-#     'lr': 9.6681665526918e-05,
-#     'weight_decay': 1.0347688244846932e-06,
-#     'dropout_rate': 0.2601194262689661,
-#     'lstm_hidden_size': 64,
-#     'lstm_layers': 3,
-#     'optimizer': 'Adam',
-# }
+INITIAL_PARAMS = {
+    'lr': 9.6681665526918e-05,
+    'weight_decay': 1.0347688244846932e-06,
+    'dropout_rate': 0.2601194262689661,
+    'lstm_hidden_size': 64,
+    'lstm_layers': 3,
+    'optimizer': 'Adam',
+}
 # BRICKCLADDING ALL
-# INITIAL_PARAMS = {  #hyper param tuned
+# INITIAL_PARAMS = {  
 #     'lr': 4.123414239637593e-05,
 #     'weight_decay': 0.00013330917640038713,
 #     'dropout_rate': 0.28496532993368257,
@@ -113,14 +113,14 @@ NORM_CONSTANTS = {
 # }
 
 # HARDYBOARD
-INITIAL_PARAMS = {  #makysm
-    'lr': 0.001,     #0.0005         # Increased from ~9e-5
-    'weight_decay': 0.0001,    # Matched colleague
-    'dropout_rate': 0.3,       # Matched colleague
-    'lstm_hidden_size': 256,   # Increased from 128
-    'lstm_layers': 3,          # Increased from 1
-    'optimizer': 'AdamW'
-}
+# INITIAL_PARAMS = {  #makysm
+#     'lr': 0.001,     #0.0005         # Increased from ~9e-5
+#     'weight_decay': 0.0001,    # Matched colleague
+#     'dropout_rate': 0.3,       # Matched colleague
+#     'lstm_hidden_size': 256,   # Increased from 128
+#     'lstm_layers': 3,          # Increased from 1
+#     'optimizer': 'AdamW'
+# }
 # INITIAL_PARAMS = {  #hp-tuned
 # 'lr': 0.0004927189971320724, 
 # 'weight_decay': 0.00033078280364781817, 
@@ -133,16 +133,16 @@ INITIAL_PARAMS = {  #makysm
 
 # This dictionary is needed by the data creation script to find the raw files.
 DATASET_CONFIGS = {
-    # "gypsum_0716": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07162025_noshutter"},
-    # "gypsum_0725": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07252025_noshutter"},
-    # "gypsum_0729": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07292025_noshutter"},
-    # "gypsum_0307": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_03072025"},  # OLD
+    "gypsum_0716": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07162025_noshutter"},
+    "gypsum_0725": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07252025_noshutter"},
+    "gypsum_0729": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07292025_noshutter"},
+    "gypsum_0307": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_03072025"},  # OLD
    
-    #"gypsum_0903": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_09032025_10holes_noshutter_Sameem"},
+    "gypsum_0903": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_09032025_10holes_noshutter_Sameem"},
    
     # "brick_cladding_0616": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0616_2025_noshutter"},
     # "brick_cladding_0805": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0805_2025_noshutter"},
     # "brick_cladding_0808": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0808_2025_noshutter"},
-    "hardyboard_0813": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_08132025_2holes_noshutter"},
-    "hardyboard_0313": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_03132025"}, # OLD
+    # "hardyboard_0813": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_08132025_2holes_noshutter"},
+    # "hardyboard_0313": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_03132025"}, # OLD
 }

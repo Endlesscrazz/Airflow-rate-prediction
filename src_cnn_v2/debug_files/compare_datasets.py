@@ -198,5 +198,12 @@ python src_cnn_v2/debug_files/compare_datasets.py \
   --output_dir "comparison_output" \
   --all
 
+# BRICKCLADDING
+python src_cnn_v2/debug_files/compare_datasets.py \
+  --user_dir "CNN_dataset/brickcladding_all_dataset_v2/dataset_cs15_nf150_aug100" \
+  --colleague_dir "/scratch/general/vast/u1527145/Maksym-code/Flow_rate_model_brickcladding/Final_data" \
+  --output_dir "comparison_output/brickcladding" \
+  --all
+
 
 """

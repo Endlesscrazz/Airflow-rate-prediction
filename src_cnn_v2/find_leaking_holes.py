@@ -38,9 +38,21 @@ POSITIONAL_ANCHORS = {
         "1": np.array([235, 313])
     },
     # Legacy / Other datasets (Optional, keeping for compatibility)
-    "0616": { "1": np.array([302, 332]), "2": np.array([128, 251]) },
-    "0805": { "1": np.array([274, 328]), "2": np.array([360, 140]) },
-    "0808": { "1": np.array([269, 327]), "2": np.array([358, 142]) },
+    #Fluke_Brickcladding_0616
+    "0616": { 
+        "1": np.array([302, 332]), 
+        "2": np.array([128, 251]) 
+        },
+    #Fluke_Brickcladding_0805
+    "0805": { 
+        "1": np.array([274, 328]), 
+        "2": np.array([360, 140]) 
+        },
+    #Fluke_Brickcladding_0808
+    "0808": { 
+        "1": np.array([269, 327]), 
+        "2": np.array([358, 142]) 
+        },
 }
 
 # --- Core Logic Functions ---
