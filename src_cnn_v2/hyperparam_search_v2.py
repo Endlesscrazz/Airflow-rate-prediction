@@ -1,9 +1,10 @@
 # src_cnn_v2/hyperparam_search_v2.py
 """
-Hyperparameter optimization script for the V2 pipeline using Optuna. (Version 5 - Tuning Penalty)
+Hyperparameter optimization script for the V2 pipeline using Optuna. (Version 7 - Exact Replica)
 
-This script automates the search for the best model hyperparameters, INCLUDING
-the asymmetric loss 'over_prediction_penalty' factor.
+- Matches train_v2.py logic exactly: NO clamping during training, Clamping during evaluation.
+- Tunes the asymmetric loss penalty.
+- Uses Automatic Mixed Precision (AMP).
 """
 import os
 import sys
@@ -28,20 +29,17 @@ from src_cnn_v2 import config_v2 as cfg
 
 # --- Asymmetric Loss Function ---
 def asymmetric_loss(preds, targets, over_prediction_penalty=1.5):
-    """
-    A robust asymmetric SmoothL1 loss that penalizes over-predictions more heavily.
-    """
     base_loss_fn = nn.SmoothL1Loss(reduction='none')
     loss = base_loss_fn(preds, targets)
     
     over_mask = preds > targets
     
-    # Apply weights
+    # Apply weights to over-predictions
     loss[over_mask] *= over_prediction_penalty
     
     return loss.mean()
 
-# --- Training and evaluation functions ---
+# --- Training function (Matched to train_v2.py: NO CLAMP) ---
 def train_one_epoch(model, dataloader, criterion, optimizer, device, scaler):
     model.train()
     running_loss = 0.0
@@ -52,6 +50,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, scaler):
 
         with torch.amp.autocast('cuda'):
             outputs_scaled = model(seq, delta_t)
+            
             loss = criterion(outputs_scaled, targets_scaled)
 
         scaler.scale(loss).backward()
@@ -64,6 +63,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, scaler):
         running_loss += loss.item() * seq.size(0)
     return running_loss / len(dataloader.dataset)
 
+# --- Evaluation function (Matched to train_v2.py: WITH CLAMP) ---
 def evaluate(model, dataloader, device):
     model.eval()
     all_targets, all_outputs = [], []
@@ -73,11 +73,15 @@ def evaluate(model, dataloader, device):
             
             with torch.amp.autocast('cuda'):
                 outputs_scaled = model(seq, delta_t)
+                
+                # --- CLAMP HERE ---
+                # We clamp predictions to valid range for metric calculation
+                outputs_scaled = outputs_scaled.clamp(0, 1)
 
             all_targets.extend((targets_scaled * cfg.MAX_FLOW_RATE).cpu().numpy())
             all_outputs.extend((outputs_scaled * cfg.MAX_FLOW_RATE).cpu().numpy())
 
-    all_outputs = np.array(all_outputs).clip(min=0)
+    all_outputs = np.array(all_outputs)
     all_targets = np.array(all_targets)
     
     mae = np.mean(np.abs(all_targets - all_outputs))
@@ -85,17 +89,15 @@ def evaluate(model, dataloader, device):
 
 # --- The Core Optuna Objective Function ---
 def objective(trial: optuna.Trial):
-    # 1. Sample Hyperparameters (Now includes the penalty!)
+    # 1. Sample Hyperparameters
     params = {
         'lr': trial.suggest_float('lr', 1e-5, 1e-2, log=True),
         'weight_decay': trial.suggest_float('weight_decay', 1e-6, 1e-3, log=True),
         'dropout_rate': trial.suggest_float('dropout_rate', 0.1, 0.6),
-        'lstm_hidden_size': trial.suggest_categorical('lstm_hidden_size', [64, 128, 256]),
+        'lstm_hidden_size': trial.suggest_categorical('lstm_hidden_size', [128, 256]),
         'lstm_layers': trial.suggest_int('lstm_layers', 1, 3),
         'optimizer': trial.suggest_categorical('optimizer', ['Adam', 'AdamW']),
-        
-        # --- NEW: Tune the penalty from 1.0 (symmetric) to 3.0 (highly asymmetric) ---
-        'over_prediction_penalty': trial.suggest_float('over_prediction_penalty', 1.0, 3.0)
+        'over_prediction_penalty': trial.suggest_float('over_prediction_penalty', 1.0, 1.8)
     }
 
     # 2. Load Data
@@ -108,7 +110,6 @@ def objective(trial: optuna.Trial):
         train_df['delta_T'] = scaler_tabular.fit_transform(train_df[['delta_T']])
         val_df['delta_T'] = scaler_tabular.transform(val_df[['delta_T']])
 
-    # Using transform=None because instance normalization is baked into .npy files
     train_dataset = CroppedSequenceDataset(train_df, cfg.DATASET_DIR, transform=None)
     val_dataset = CroppedSequenceDataset(val_df, cfg.DATASET_DIR, transform=None)
     
@@ -128,18 +129,20 @@ def objective(trial: optuna.Trial):
     else:
         optimizer = optim.AdamW(model.parameters(), lr=params['lr'], weight_decay=params['weight_decay'])
     
-    # --- USE THE TUNED PENALTY ---
     criterion = lambda preds, targets: asymmetric_loss(preds, targets, over_prediction_penalty=params['over_prediction_penalty'])
     
     scaler_amp = torch.amp.GradScaler('cuda')
+    
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=10)
 
     # 5. Training Loop
     best_val_mae = float('inf')
     
-    for epoch in range(30): # 30 epochs is enough to see convergence trajectory
+    for epoch in range(50): 
         train_one_epoch(model, train_loader, criterion, optimizer, cfg.DEVICE, scaler_amp)
         val_mae = evaluate(model, val_loader, cfg.DEVICE)
         
+        scheduler.step(val_mae)
         trial.report(val_mae, epoch)
 
         if trial.should_prune():
@@ -152,12 +155,11 @@ def objective(trial: optuna.Trial):
 
 
 def main():
-    print(f"--- Starting Hyperparameter Search (with Penalty Tuning) for: {cfg.EXPERIMENT_NAME} ---")
+    print(f"--- Starting Hyperparameter Search for: {cfg.EXPERIMENT_NAME} ---")
   
     os.makedirs(cfg.EXPERIMENT_RESULTS_DIR, exist_ok=True)
     storage_name = f"sqlite:///{os.path.join(cfg.EXPERIMENT_RESULTS_DIR, 'hyperparam_search.db')}"
-    # Changed study name to keep it separate from previous runs
-    study_name = f"{cfg.EXPERIMENT_NAME}_{cfg.EXPERIMENT_VERSION}_penalty_tuning"
+    study_name = f"{cfg.EXPERIMENT_NAME}_{cfg.EXPERIMENT_VERSION}"
 
     print(f"  - Using storage: {storage_name}")
     print(f"  - Study name: {study_name}")
@@ -167,7 +169,7 @@ def main():
         storage=storage_name,
         load_if_exists=True, 
         direction='minimize',
-        pruner=optuna.pruners.MedianPruner(n_warmup_steps=5, n_min_trials=5)
+        pruner=optuna.pruners.MedianPruner(n_warmup_steps=10, n_min_trials=10)
     )
     
     print("  - Starting optimization...")
@@ -190,14 +192,14 @@ def main():
     print("INITIAL_PARAMS = {")
     for key, value in best_trial.params.items():
         if key == 'over_prediction_penalty':
-            continue # Print this separately
+            continue 
         if isinstance(value, str):
             print(f"    '{key}': '{value}',")
         else:
             print(f"    '{key}': {value},")
     print("}")
     print(f"\n# AND set this variable in train_v2.py:")
-    print(f"over_prediction_penalty = {best_trial.params['over_prediction_penalty']}")
+    print(f"over_pred_penalty = {best_trial.params['over_prediction_penalty']}")
 
 if __name__ == "__main__":
     main()

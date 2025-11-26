@@ -9,6 +9,7 @@ import seaborn as sns
 from torch.utils.data import DataLoader
 from torchvision import transforms
 import joblib
+import argparse
 
 # Add project root to path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -20,8 +21,6 @@ from src_cnn_v2.models_v2 import SimpleCropRegressor
 
 # --- Configuration ---
 sns.set_theme(style="whitegrid")
-PLOT_DIR = os.path.join(cfg.EXPERIMENT_RESULTS_DIR, "diagnostic_plots")
-os.makedirs(PLOT_DIR, exist_ok=True)
 
 def run_inference(model, dataloader, device):
     model.eval()
@@ -33,7 +32,13 @@ def run_inference(model, dataloader, device):
             seq = seq.to(device)
             delta_t = delta_t.to(device)
             
-            outputs_scaled = model(seq, delta_t)
+            # Enable mixed precision context
+            with torch.amp.autocast('cuda'):
+                outputs_scaled = model(seq, delta_t)
+                
+                # --- CRITICAL UPDATE: CLAMP OUTPUTS ---
+                # Matches the logic used in train_v2.py evaluation
+                outputs_scaled = outputs_scaled.clamp(0, 1)
             
             # De-normalize
             preds = (outputs_scaled * cfg.MAX_FLOW_RATE).cpu().numpy()
@@ -42,9 +47,9 @@ def run_inference(model, dataloader, device):
             all_preds.extend(preds)
             all_targets.extend(targets)
             
-    return np.array(all_preds).clip(min=0), np.array(all_targets)
+    return np.array(all_preds), np.array(all_targets)
 
-def plot_diagnostic(df, split_name):
+def plot_diagnostic(df, split_name, save_dir):
     """Generates diagnostic plots for a specific data split."""
     true_vals = df['airflow_rate']
     pred_vals = df['predicted_airflow']
@@ -65,7 +70,7 @@ def plot_diagnostic(df, split_name):
     plt.xlim(lims)
     plt.ylim(lims)
     plt.tight_layout()
-    plt.savefig(os.path.join(PLOT_DIR, f"{split_name}_true_vs_pred.png"))
+    plt.savefig(os.path.join(save_dir, f"{split_name}_true_vs_pred.png"))
     plt.close()
 
     # 2. Residual Plot (True Value vs Error) - Helps spot saturation
@@ -76,23 +81,38 @@ def plot_diagnostic(df, split_name):
     plt.xlabel('True Airflow (L/min)')
     plt.ylabel('Residual (True - Predicted)')
     plt.tight_layout()
-    plt.savefig(os.path.join(PLOT_DIR, f"{split_name}_residuals.png"))
+    plt.savefig(os.path.join(save_dir, f"{split_name}_residuals.png"))
     plt.close()
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=cfg.RANDOM_STATE, 
+                        help="Random seed used for training (to locate the correct result folder)")
+    args = parser.parse_args()
+    
     print(f"--- Running Model Diagnostics ---")
-    print(f"Experiment: {cfg.EXPERIMENT_NAME}")
+    print(f"Experiment: {cfg.EXPERIMENT_NAME} | Version: {cfg.EXPERIMENT_VERSION}")
+    print(f"Target Seed: {args.seed}")
+    
+    # --- 1. Determine Results Directory ---
+    seed_specific_dir = f"{cfg.EXPERIMENT_RESULTS_DIR}_SEED_{args.seed}"
+    
+    if os.path.exists(seed_specific_dir):
+        RESULTS_DIR = seed_specific_dir
+        print(f"Found seed-specific results directory: {RESULTS_DIR}")
+    else:
+        RESULTS_DIR = cfg.EXPERIMENT_RESULTS_DIR
+        print(f"Seed directory not found. checking base directory: {RESULTS_DIR}")
+
+    PLOT_DIR = os.path.join(RESULTS_DIR, "diagnostic_plots")
+    os.makedirs(PLOT_DIR, exist_ok=True)
     print(f"Saving plots to: {PLOT_DIR}")
 
-    # 1. Load Model and Scaler
-    scaler_path = os.path.join(cfg.EXPERIMENT_RESULTS_DIR, "scaler_v2.pkl")
-    model_path = os.path.join(cfg.EXPERIMENT_RESULTS_DIR, "best_model_v2.pth")
-
+    # 2. Load Model
+    model_path = os.path.join(RESULTS_DIR, "best_model_v2.pth")
     if not os.path.exists(model_path):
-        sys.exit("Model not found. Run training first.")
+        sys.exit(f"Model not found at {model_path}. Run training first.")
 
-    scaler = joblib.load(scaler_path)
-    
     model = SimpleCropRegressor(
         lstm_hidden_size=cfg.INITIAL_PARAMS['lstm_hidden_size'],
         lstm_layers=cfg.INITIAL_PARAMS['lstm_layers'],
@@ -100,22 +120,29 @@ def main():
     ).to(cfg.DEVICE)
     model.load_state_dict(torch.load(model_path, map_location=cfg.DEVICE))
     
-    # 2. Prepare Transforms (Instance Norm is handled in Dataset, so standard norm is identity here usually)
-    # But we respect config just in case
-    norm_params = cfg.NORM_CONSTANTS[1]
-    data_transform = transforms.Compose([transforms.Normalize(mean=norm_params["mean"], std=norm_params["std"])])
+    # 3. Prepare Scaler (Conditional)
+    scaler = None
+    if cfg.ENABLE_PER_FOLD_SCALING:
+        scaler_path = os.path.join(RESULTS_DIR, "scaler_v2.pkl")
+        if not os.path.exists(scaler_path):
+            sys.exit(f"Scaler enabled in config but not found at {scaler_path}")
+        scaler = joblib.load(scaler_path)
+        print("Scaler loaded.")
+    else:
+        print("Per-fold scaling disabled. Using raw Delta T.")
 
     # --- DIAGNOSE TRAINING SET ---
     print("\n... Processing Training Set (this may take time) ...")
     train_df = pd.read_csv(cfg.TRAIN_METADATA_PATH)
     
-    # OPTIONAL: Sample the training set if it's too huge (e.g., take 2000 samples)
-    # train_df = train_df.sample(n=min(len(train_df), 2000), random_state=42) 
+    # OPTIONAL: Sample if training set is huge
+    # train_df = train_df.sample(n=min(len(train_df), 5000), random_state=42)
     
     train_df_scaled = train_df.copy()
-    train_df_scaled['delta_T'] = scaler.transform(train_df_scaled[['delta_T']])
+    if scaler:
+        train_df_scaled['delta_T'] = scaler.transform(train_df_scaled[['delta_T']])
     
-    train_ds = CroppedSequenceDataset(train_df_scaled, cfg.DATASET_DIR, transform=data_transform)
+    train_ds = CroppedSequenceDataset(train_df_scaled, cfg.DATASET_DIR, transform=None)
     train_loader = DataLoader(train_ds, batch_size=cfg.BATCH_SIZE*2, shuffle=False, num_workers=4)
 
     train_preds, train_targets = run_inference(model, train_loader, cfg.DEVICE)
@@ -123,10 +150,10 @@ def main():
     train_df['predicted_airflow'] = train_preds
     train_df['absolute_error'] = (train_df['airflow_rate'] - train_df['predicted_airflow']).abs()
     
-    plot_diagnostic(train_df, "Training")
+    plot_diagnostic(train_df, "Training", PLOT_DIR)
     
     # Save Training Report
-    train_report_path = os.path.join(cfg.EXPERIMENT_RESULTS_DIR, "training_set_report.xlsx")
+    train_report_path = os.path.join(PLOT_DIR, "training_set_report.xlsx")
     train_df.to_excel(train_report_path, index=False)
     print(f"Training diagnosis saved to: {train_report_path}")
 
@@ -134,9 +161,10 @@ def main():
     print("\n... Processing Validation Set ...")
     val_df = pd.read_csv(cfg.VAL_METADATA_PATH)
     val_df_scaled = val_df.copy()
-    val_df_scaled['delta_T'] = scaler.transform(val_df_scaled[['delta_T']])
+    if scaler:
+        val_df_scaled['delta_T'] = scaler.transform(val_df_scaled[['delta_T']])
 
-    val_ds = CroppedSequenceDataset(val_df_scaled, cfg.DATASET_DIR, transform=data_transform)
+    val_ds = CroppedSequenceDataset(val_df_scaled, cfg.DATASET_DIR, transform=None)
     val_loader = DataLoader(val_ds, batch_size=cfg.BATCH_SIZE*2, shuffle=False, num_workers=4)
 
     val_preds, val_targets = run_inference(model, val_loader, cfg.DEVICE)
@@ -144,12 +172,16 @@ def main():
     val_df['predicted_airflow'] = val_preds
     val_df['absolute_error'] = (val_df['airflow_rate'] - val_df['predicted_airflow']).abs()
 
-    plot_diagnostic(val_df, "Validation")
-    print("Validation diagnosis plots created.")
+    plot_diagnostic(val_df, "Validation", PLOT_DIR)
+    
+    # Save Validation Report
+    val_report_path = os.path.join(PLOT_DIR, "validation_set_report.xlsx")
+    val_df.to_excel(val_report_path, index=False)
+    print(f"Validation diagnosis saved to: {val_report_path}")
 
-    print(f"\n--- Diagnosis Complete. Check {PLOT_DIR} ---")
+    print(f"\n--- Diagnosis Complete. ---")
 
 if __name__ == "__main__":
     main()
-
-# python -m src_cnn_v2.diagnose_model_v2
+    
+# python -m src_cnn_v2.diagnose_model_v2 --seed 42

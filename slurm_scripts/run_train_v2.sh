@@ -56,7 +56,7 @@ echo "----------------"
 #==============================================================================
 echo "--- Starting V2 Model Training ---"
 
-python src_cnn_v2/train_v2.py
+python src_cnn_v2/train_v2.py --seed 42
 
 echo "========================================================"
 echo "Training job finished on $(date)"

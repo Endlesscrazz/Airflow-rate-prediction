@@ -52,14 +52,14 @@ echo "---------------------------"
 # Run the Leak Finding Script
 #==============================================================================
 echo "--- Starting Leak Coordinate Generation ---"
-echo "--Fluke_HardyBoard_08132025_2holes_noshutter--"
+echo "--Fluke_HardyBoard_03132025--"
 
 # Run the script using the robust 'python -m' method.
 # The command arguments are taken directly from your request.
 python -m src_cnn_v2.find_leaking_holes \
-    --dataset_dir /scratch/general/vast/u1527145/datasets/Fluke_HardyBoard_08132025_2holes_noshutter \
-    --base_output_dir /scratch/general/vast/u1527145/Airflow-rate-prediction/Output_SAM/datasets/Fluke_HardyBoard_08132025_2holes_noshutter \
-    --num_leaks 2 \
+    --dataset_dir /scratch/general/vast/u1527145/datasets/Fluke_HardyBoard_03132025 \
+    --base_output_dir /scratch/general/vast/u1527145/Airflow-rate-prediction/Output_SAM/datasets/Fluke_HardyBoard_03132025 \
+    --num_leaks 1 \
     --debug
 
 echo "========================================================"

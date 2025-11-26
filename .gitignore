@@ -37,6 +37,8 @@ stabilization_poc_output/
 debug_stabilized_outputs/
 realtime_poc_outputs/
 two_stream_output/
+Output_CNN-LSTM/
+comparison_output/
 
 # --- Large Model Checkpoints ---
 SAM/
@@ -68,7 +70,8 @@ hotspot_masks/
 logs/
 *.log
 *.out
-
+leak_logs/
+hyperparam-logs/
 # --- Specific Generated Files ---
 master_features.csv
 

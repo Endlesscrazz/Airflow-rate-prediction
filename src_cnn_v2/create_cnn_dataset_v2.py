@@ -1,18 +1,18 @@
 # src_cnn_v2/create_cnn_dataset_v2.py
 """
-Prepares a V2 dataset for the bottom-up CNN approach. (VERSION 6 - FINAL)
-- Reads pre-generated coordinate .json files to find leak epicenters.
-- Creates fixed-size .npy crops with RAW thermal values.
-- Implements a "Clean Replay" strategy for robust training data balance.
-- Creates configurable augmentations (geometric + noise) for the training set.
-- Correctly counts and logs created vs. skipped files.
+Prepares a V2 dataset for the bottom-up CNN approach.
+MATCHES COLLEAGUE PREPROCESSING EXACTLY:
+- Reads pre-generated coordinate .json files.
+- Frame Selection: CONSECUTIVE (0, 1, 2...) not Linspace.
+- Padding: Replicates last frame if video is too short.
+- Data Content: RAW TEMPERATURE VALUES (No normalization on disk).
+- Augmentation: Adds Gaussian Noise to RAW data.
 """
 import os
 import sys
 import pandas as pd
 import numpy as np
 import scipy.io
-import cv2
 from tqdm import tqdm
 import glob
 import random
@@ -20,33 +20,44 @@ import traceback
 import json
 import argparse
 
+# Add project root to path for imports
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
 from src_cnn_v2 import config_v2 as cfg
-from src_cnn_v2.augmentation_utils import add_gaussian_noise, augment_geometric
-from src_cnn_v2.logging_utils_v2 import log_experiment_details
+from src_cnn_v2.augmentation_utils import add_gaussian_noise
 
 def crop_sequence(frames, center_x, center_y, crop_size):
+    """Crops a fixed size patch around the center coordinates."""
     H, W, T = frames.shape
     half_crop = crop_size // 2
+    
+    # Calculate bounds ensuring we stay within image
     x_start = max(0, center_x - half_crop)
     x_end = min(W, x_start + crop_size)
-    if x_end - x_start < crop_size: x_start = x_end - crop_size
+    
+    # Adjust if hitting right edge
+    if x_end - x_start < crop_size:
+        x_start = max(0, W - crop_size)
+        x_end = W
+    
     y_start = max(0, center_y - half_crop)
     y_end = min(H, y_start + crop_size)
-    if y_end - y_start < crop_size: y_start = y_end - crop_size
+    
+    # Adjust if hitting bottom edge
+    if y_end - y_start < crop_size:
+        y_start = max(0, H - crop_size)
+        y_end = H
+        
     return frames[y_start:y_end, x_start:x_end, :]
 
 def process_split(df_split, is_training_set, output_dir, debug=False):
     all_metadata_rows = []
-    failed_samples = []
     counts = {'created': 0, 'skipped': 0}
-    desc = "Processing " + ("Training" if is_training_set else "Test/Validation") + " Samples"
     
     iterator = df_split.iterrows()
     if not debug:
-        iterator = tqdm(iterator, total=len(df_split), desc=desc)
+        iterator = tqdm(iterator, total=len(df_split), desc="Processing")
 
     for index, master_row in iterator:
         try:
@@ -61,88 +72,113 @@ def process_split(df_split, is_training_set, output_dir, debug=False):
 
             cropped_sequence = None
 
+            # --- 1. GENERATE ORIGINAL SEQUENCE ---
             if os.path.exists(original_filepath):
                 counts['skipped'] += 1
             else:
                 counts['created'] += 1
-                mat_filepath, found_config_key = (None, None)
+                
+                # A. Find Raw Video File
+                mat_filepath = None
                 for d_key, d_conf in cfg.DATASET_CONFIGS.items():
                     video_search_pattern = os.path.join(cfg.RAW_DATASET_PARENT_DIR, d_conf["dataset_subfolder"], '**', f"{video_id}.mat")
                     video_results = glob.glob(video_search_pattern, recursive=True)
                     if video_results:
-                        mat_filepath, found_config_key = video_results[0], d_key
+                        mat_filepath = video_results[0]
                         break
-                if not mat_filepath: raise FileNotFoundError(f".mat file not found for video_id '{video_id}'")
                 
-                coord_subfolder = cfg.DATASET_CONFIGS[found_config_key]["dataset_subfolder"]
-                coord_search_pattern = os.path.join(cfg.RAW_MASK_PARENT_DIR, coord_subfolder, '**', video_id)
-                coord_dir_results = glob.glob(coord_search_pattern, recursive=True)
-                coord_dir_path = next((path for path in coord_dir_results if os.path.isdir(path)), None)
-                if not coord_dir_path: raise FileNotFoundError(f"Coordinate directory not found for video_id '{video_id}'")
+                if not mat_filepath:
+                    if debug: print(f"Skipping {video_id}: .mat file not found")
+                    continue
                 
-                coord_path = os.path.join(coord_dir_path, f"{video_id}_coordinates.json")
-                if not os.path.exists(coord_path):
-                    raise FileNotFoundError(f"Coordinates file not found for video '{video_id}' at: {coord_path}")
-
+                # B. Find Coordinates File
+                coord_path = None
+                for d_key, d_conf in cfg.DATASET_CONFIGS.items():
+                    coord_search_pattern = os.path.join(cfg.RAW_MASK_PARENT_DIR, d_conf["dataset_subfolder"], '**', video_id)
+                    coord_dir_results = glob.glob(coord_search_pattern, recursive=True)
+                    coord_dir_path = next((path for path in coord_dir_results if os.path.isdir(path)), None)
+                    if coord_dir_path:
+                        possible_path = os.path.join(coord_dir_path, f"{video_id}_coordinates.json")
+                        if os.path.exists(possible_path):
+                            coord_path = possible_path
+                            break
+                
+                if not coord_path:
+                    if debug: print(f"Skipping {video_id}: Coordinates not found")
+                    continue
+                
                 with open(coord_path, 'r') as f:
                     all_leaks_in_video = json.load(f)
                 
                 target_leak_data = next((leak for leak in all_leaks_in_video if str(leak['hole_id']) == numeric_hole_id), None)
                 if target_leak_data is None:
-                    raise ValueError(f"Hole ID '{numeric_hole_id}' not found in coordinates file: {coord_path}")
-
-                center_x, center_y = target_leak_data['center_x'], target_leak_data['center_y']
+                    if debug: print(f"Skipping {video_id}: Hole {numeric_hole_id} not in json")
+                    continue
                 
+                center_x = target_leak_data['center_x']
+                center_y = target_leak_data['center_y']
+                
+                # C. Load Raw Frames
+                # Use float32 to save space but keep precision
                 frames = scipy.io.loadmat(mat_filepath).get('TempFrames').astype(np.float32)
+
+                # --- FIX: DO NOT NORMALIZE HERE ---
+                # The colleague saves RAW temperature data (e.g., 23.0).
+                # Normalization happens in the DataLoader.
                 
-                end_frame = min(frames.shape[2], int(cfg.FOCUS_DURATION_SECONDS * cfg.TRUE_FPS))
-                if end_frame < cfg.NUM_FRAMES_PER_SAMPLE: raise ValueError(f"Video too short ({frames.shape[2]} frames)")
+                # 1. Just Transpose to (Height, Width, Time) if not already
+                # Mat files are usually (H, W, T)
                 
-                frame_indices = np.linspace(0, end_frame - 1, cfg.NUM_FRAMES_PER_SAMPLE, dtype=int)
-                selected_frames = frames[:, :, frame_indices]
+                # D. Consecutive Frame Selection
+                num_frames_needed = cfg.NUM_FRAMES_PER_SAMPLE
+                
+                if frames.shape[2] >= num_frames_needed:
+                    # Take first N frames consecutively
+                    selected_frames = frames[:, :, :num_frames_needed]
+                else:
+                    # Pad by repeating the last frame
+                    padding_needed = num_frames_needed - frames.shape[2]
+                    last_frame = frames[:, :, -1:] 
+                    padding_block = np.repeat(last_frame, padding_needed, axis=2)
+                    selected_frames = np.concatenate([frames, padding_block], axis=2)
+
+                # E. Crop RAW Data
                 cropped_frames = crop_sequence(selected_frames, center_x, center_y, cfg.V2_DATASET_PARAMS["CROP_SIZE"])
-                if cropped_frames.shape[:2] != (cfg.V2_DATASET_PARAMS["CROP_SIZE"], cfg.V2_DATASET_PARAMS["CROP_SIZE"]):
-                    raise ValueError(f"Cropped shape is incorrect: {cropped_frames.shape[:2]}")
                 
+                # Transpose to (Time, Height, Width) for PyTorch convention
+                # Colleague saves as (H, W, T), but our loader expects (T, H, W) or handles it.
+                # To be consistent with *our* loader (dataset_utils_v2.py), we save as (T, H, W).
+                # Note: Colleague saves (H, W, T), but his loader transposes it.
                 cropped_sequence = cropped_frames.transpose(2, 0, 1)
+
                 np.save(original_filepath, cropped_sequence)
 
+            # Base metadata record
             base_record = {
-                'original_sample_id': sample_id, 'video_id': video_id, 'hole_id': hole_id,
-                'airflow_rate': master_row['airflow_rate'], 'delta_T': master_row['delta_T']
+                'original_sample_id': sample_id, 
+                'video_id': video_id, 
+                'hole_id': hole_id,
+                'airflow_rate': master_row['airflow_rate'], 
+                'delta_T': master_row['delta_T']
             }
 
+            # --- 2. AUGMENTATION (TRAINING ONLY) ---
             if is_training_set:
-                replay_factor = max(1, cfg.V2_DATASET_PARAMS["NUM_AUGMENTATIONS"] // 9)
-                for i in range(replay_factor):
-                    all_metadata_rows.append({
-                        'sample_id': f"{sample_id}_orig_replay_{i}",
-                        'image_path': original_filename,
-                        **base_record
-                    })
-                
+                # Load the raw sequence if we didn't just create it
                 if cropped_sequence is None:
                     cropped_sequence = np.load(original_filepath)
 
                 aug_params = cfg.V2_DATASET_PARAMS.get("AUGMENTATION_PARAMS", {})
+                
                 for i in range(cfg.V2_DATASET_PARAMS["NUM_AUGMENTATIONS"]):
                     aug_filename = f"{sample_id}_aug_{i+1}.npy"
                     aug_filepath = os.path.join(output_dir, aug_filename)
                     
-                    if os.path.exists(aug_filepath):
-                        counts['skipped'] += 1
-                    else:
-                        counts['created'] += 1
-                        augmented_sequence = cropped_sequence.copy()
-                        if cfg.V2_DATASET_PARAMS.get("ENABLE_GEOMETRIC_AUGMENTATION", False):
-                            augmented_sequence = augment_geometric(
-                                augmented_sequence,
-                                rotation_degrees=aug_params.get("ROTATION_DEGREES", 10),
-                                translation_frac=aug_params.get("TRANSLATION_FRAC", 0.1)
-                            )
+                    if not os.path.exists(aug_filepath):
+                        # Add Gaussian Noise to RAW data
                         augmented_sequence = add_gaussian_noise(
-                            augmented_sequence, 
-                            noise_level=aug_params.get("NOISE_LEVEL", 0.05)
+                            cropped_sequence.copy(), 
+                            noise_level=aug_params.get("NOISE_LEVEL", 0.105)
                         )
                         np.save(aug_filepath, augmented_sequence)
                     
@@ -152,96 +188,55 @@ def process_split(df_split, is_training_set, output_dir, debug=False):
                         **base_record
                     })
             else:
+                # Validation/Test: Only original
                 all_metadata_rows.append({
                     'sample_id': original_sample_id_v2,
                     'image_path': original_filename,
                     **base_record
                 })
+
         except Exception as e:
             if debug:
-                print(f"\n\n--- SCRIPT STOPPED DUE TO ERROR ---")
-                print(f"Failed on sample_id: '{master_row.get('sample_id', 'N/A')}'")
+                print(f"Error processing {master_row.get('sample_id')}: {e}")
                 traceback.print_exc()
                 sys.exit(1)
-            failed_samples.append({'sample_id': master_row.get('sample_id', 'N/A'), 'error': str(e)})
             continue
             
-    print(f"  - Split processing complete. Created: {counts['created']} new .npy files, Skipped: {counts['skipped']} existing files.")
-    return all_metadata_rows, failed_samples, counts
+    print(f"  - Processed. Created: {counts['created']}, Skipped: {counts['skipped']}")
+    return all_metadata_rows, counts
 
 def main():
-    parser = argparse.ArgumentParser(description="V2 Dataset Creation Script.")
-    parser.add_argument("--debug", action='store_true', help="Enable debug mode to stop on first error and get verbose logs.")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--debug", action='store_true')
     args = parser.parse_args()
 
     random.seed(cfg.RANDOM_STATE)
     np.random.seed(cfg.RANDOM_STATE)
-    output_dir = cfg.DATASET_DIR
-    os.makedirs(output_dir, exist_ok=True)
+    
+    # Ensure output dir exists
+    os.makedirs(cfg.DATASET_DIR, exist_ok=True)
 
-    print("--- Starting V2 Dataset Creation (Cropped & Augmented) ---")
-    print(f"  - Using data split from random seed: {cfg.RANDOM_STATE}")
-    print(f"  - Output directory for .npy files: {output_dir}")
-
+    print("--- Creating RAW V2 Dataset (Matches Colleague: Raw Crop) ---")
+    print(f"Target Directory: {cfg.DATASET_DIR}")
+    
     try:
         train_df = pd.read_csv(cfg.TRAIN_SPLIT_PATH)
         val_df = pd.read_csv(cfg.VAL_SPLIT_PATH)
         test_df = pd.read_csv(cfg.TEST_SPLIT_PATH)
     except FileNotFoundError:
-        sys.exit(f"FATAL: Split files for seed {cfg.RANDOM_STATE} not found. Please run 'split_data_v2.py' first.")
+        sys.exit(f"FATAL: Split files not found. Please run split_data_maksym.py first.")
 
-    train_metadata, train_fails, train_counts = process_split(train_df, is_training_set=True, output_dir=output_dir, debug=args.debug)
-    val_metadata, val_fails, val_counts = process_split(val_df, is_training_set=False, output_dir=output_dir, debug=args.debug)
-    test_metadata, test_fails, test_counts = process_split(test_df, is_training_set=False, output_dir=output_dir, debug=args.debug)
-    failed_samples = train_fails + val_fails + test_fails
-
-    if not (train_metadata or val_metadata or test_metadata):
-        print("\nFATAL: No metadata was generated. Check for errors."); return
-
-    df_meta_train = pd.DataFrame(train_metadata)
-    df_meta_val = pd.DataFrame(val_metadata)
-    df_meta_test = pd.DataFrame(test_metadata)
-
-    df_meta_train.to_csv(cfg.TRAIN_METADATA_PATH, index=False)
-    df_meta_val.to_csv(cfg.VAL_METADATA_PATH, index=False)
-    df_meta_test.to_csv(cfg.TEST_METADATA_PATH, index=False)
-
-    print(f"\nSuccessfully created V2 dataset.")
-    print(f"  - Training samples created: {len(df_meta_train)}")
-    print(f"  - Validation samples created: {len(df_meta_val)}")
-    print(f"  - Test samples created: {len(df_meta_test)}")
-    print(f"  - Metadata saved to versioned files (e.g., {os.path.basename(cfg.TRAIN_METADATA_PATH)})")
-
-    log_filepath = os.path.join(cfg.EXPERIMENT_RESULTS_DIR, "experiment_summary.txt")
-    os.makedirs(cfg.EXPERIMENT_RESULTS_DIR, exist_ok=True)
-    data_creation_params = {
-        "Experiment Name": cfg.EXPERIMENT_NAME,
-        "Source Ground Truth CSV": os.path.basename(cfg.GROUND_TRUTH_CSV_PATH),
-        "V2 Dataset Parameters": {k: v for k, v in cfg.V2_DATASET_PARAMS.items() if k != "OUTPUT_SUBDIR"},
-        "Frames Per Sample": cfg.NUM_FRAMES_PER_SAMPLE,
-        "Focus Duration (seconds)": cfg.FOCUS_DURATION_SECONDS,
-        "Final Train Samples (with augmentations)": len(df_meta_train),
-        "Final Validation Samples": len(df_meta_val),
-        "Final Test Samples": len(df_meta_test),
-        "Original Train Samples": len(train_df),
-        "Original Validation Samples": len(val_df),
-        "Original Test Samples": len(test_df),
-        "File Generation Summary": {
-            "Training Set": train_counts,
-            "Validation Set": val_counts,
-            "Test Set": test_counts,
-            "Total Created": train_counts['created'] + val_counts['created'] + test_counts['created'],
-            "Total Skipped": train_counts['skipped'] + val_counts['skipped'] + test_counts['skipped']
-        }
-    }
-    log_experiment_details(log_filepath, "Data Creation Parameters", data_creation_params)
-
-    if failed_samples:
-        print(f"\nWarning: {len(failed_samples)} original samples failed during processing.")
-        for i, failed in enumerate(failed_samples[:5]):
-            print(f"  - Sample ID: '{failed['sample_id']}', Reason: {failed['error']}")
+    train_meta, _ = process_split(train_df, True, cfg.DATASET_DIR, args.debug)
+    val_meta, _ = process_split(val_df, False, cfg.DATASET_DIR, args.debug)
+    test_meta, _ = process_split(test_df, False, cfg.DATASET_DIR, args.debug)
+    
+    pd.DataFrame(train_meta).to_csv(cfg.TRAIN_METADATA_PATH, index=False)
+    pd.DataFrame(val_meta).to_csv(cfg.VAL_METADATA_PATH, index=False)
+    pd.DataFrame(test_meta).to_csv(cfg.TEST_METADATA_PATH, index=False)
+    
+    print(f"\nDone. Metadata saved to {cfg.TRAIN_METADATA_PATH}")
 
 if __name__ == "__main__":
     main()
-
+    
 # python src_cnn_v2/create_cnn_dataset_v2.py --debug

@@ -34,19 +34,17 @@ class CroppedSequenceDataset(Dataset):
         # 1. Get sample metadata
         sample_row = self.metadata.iloc[idx]
         
-        # 2. Load the cropped image sequence (raw thermal values)
+        # 2. Load the cropped image sequence
         sequence_path = os.path.join(self.cnn_dataset_dir, sample_row['image_path'])
-        # Sequence is saved as (Time, Height, Width)
         data = np.load(sequence_path).astype(np.float32)
 
-        # --- START OF NEW NORMALIZATION LOGIC ---
-        # 3. Perform dynamic instance normalization
-        #    This scales each video clip to its own 0-1 range.
+        # --- MATCH COLLEAGUE: MAX NORMALIZATION IN LOADER ---
+        # Data comes in Frame-Normalized (centered around 1.0).
+        # We now scale it to [0, 1] relative to the max value in this specific clip.
         max_val = np.max(data)
-        if max_val > 0:
+        if max_val > 1e-6:
             data = data / max_val
-        # --- END OF NEW NORMALIZATION LOGIC ---
-
+        
         # 4. Add a channel dimension: (Time, 1, Height, Width)
         data = np.expand_dims(data, axis=1)
         

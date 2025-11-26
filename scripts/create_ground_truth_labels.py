@@ -40,7 +40,7 @@ def main():
     # Configure this for the machine you are running on
     DATASETS_ROOT = "/scratch/general/vast/u1527145/datasets"
     # The output file name should match what's in config_v2.py
-    OUTPUT_CSV_PATH = "airflow_ground_truth_brickcladding_all.csv"
+    OUTPUT_CSV_PATH = "airflow_ground_truth_hardyboard_all.csv"
 
     DATASET_CONFIGS = {
         # New Gypsum

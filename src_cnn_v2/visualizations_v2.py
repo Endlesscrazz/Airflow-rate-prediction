@@ -9,6 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import argparse
 
 # Add project root to path for imports
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -107,11 +108,26 @@ def plot_error_distribution(preds_df, save_dir):
     plt.close()
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=cfg.RANDOM_STATE, 
+                        help="Random seed used for training (to locate the correct result folder)")
+    args = parser.parse_args()
     print(f"--- Generating V2 Visualizations ---")
     print(f"Experiment: {cfg.EXPERIMENT_NAME} | Version: {cfg.EXPERIMENT_VERSION}")
     
     # --- Use the flexible, versioned results directory ---
-    RESULTS_DIR = cfg.EXPERIMENT_RESULTS_DIR
+    # --- 1. Determine Results Directory ---
+    # Check if the _SEED_XX folder exists (created by ensemble train script)
+    seed_specific_dir = f"{cfg.EXPERIMENT_RESULTS_DIR}_SEED_{args.seed}"
+    
+    if os.path.exists(seed_specific_dir):
+        RESULTS_DIR = seed_specific_dir
+        print(f"Found seed-specific results directory: {RESULTS_DIR}")
+    else:
+        # Fallback to base directory
+        RESULTS_DIR = cfg.EXPERIMENT_RESULTS_DIR
+        print(f"Seed directory not found. checking base directory: {RESULTS_DIR}")
+        
     log_path = os.path.join(RESULTS_DIR, "training_log.csv")
     test_report_path = os.path.join(RESULTS_DIR, "test_set_report.xlsx")
     
@@ -140,4 +156,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-# python src_cnn_v2/visualizations_v2.py
+# python src_cnn_v2/visualizations_v2.py --seed 42

@@ -11,11 +11,11 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 RANDOM_STATE = 42
 
 # --- 1. SET THE EXPERIMENT NAME ---
-EXPERIMENT_NAME = "brickcladding_all_dataset_v2"
+EXPERIMENT_NAME = "hardyboard_all_dataset_v2"
 
 # --- 2. SET THE EXPERIMENT VERSION ---
 # Change this for each new run to create a unique results folder.
-EXPERIMENT_VERSION = "iter-13-cs15-hp-tuning-overpred-2.2-rs43"
+EXPERIMENT_VERSION = "iter-34-cs15-from-scratch-makysm-hp-overpred-2.5-rs42"
 
 # --- 3. SET DATA CREATION PARAMETERS ---
 # These parameters define the dataset that will be generated.
@@ -42,7 +42,7 @@ RAW_MASK_PARENT_DIR = '/scratch/general/vast/u1527145/Airflow-rate-prediction/Ou
 OUTPUT_DIR = os.path.join(DATA_DIR, EXPERIMENT_NAME)
 EXPERIMENT_RESULTS_DIR = os.path.join(RESULTS_DIR, EXPERIMENT_NAME, EXPERIMENT_VERSION)
 MASTER_METADATA_PATH = os.path.join(OUTPUT_DIR, "master_metadata_v2.csv")
-GROUND_TRUTH_CSV_PATH = os.path.join(PROJECT_ROOT, "airflow_ground_truth_brickcladding_all.csv")
+GROUND_TRUTH_CSV_PATH = os.path.join(PROJECT_ROOT, "airflow_ground_truth_hardyboard_all.csv")
 
 # --- Versioned paths for SPLIT files ---
 TRAIN_SPLIT_PATH = os.path.join(OUTPUT_DIR, f"train_split_seed{RANDOM_STATE}.csv")
@@ -65,7 +65,7 @@ V2_DATASET_PARAMS = {
     "NUM_AUGMENTATIONS": NUM_AUGMENTATIONS,
     "ENABLE_GEOMETRIC_AUGMENTATION": False, # Can be enabled/disabled for experiments
     "AUGMENTATION_PARAMS": {
-        "NOISE_LEVEL": 0.05,
+        "NOISE_LEVEL": 0.105,   # makysm hardyboard config
         "ROTATION_DEGREES": 10,
         "TRANSLATION_FRAC": 0.1,
     }
@@ -73,8 +73,8 @@ V2_DATASET_PARAMS = {
 
 # --- V2 Training Hyperparameters ---
 BATCH_SIZE = 16 # Lowered for 150-frame sequences
-NUM_EPOCHS = 100
-ENABLE_PER_FOLD_SCALING = True
+NUM_EPOCHS = 300
+ENABLE_PER_FOLD_SCALING = False
 SCALER_KIND = "robust"
 SAVE_SCALERS = True
 
@@ -82,7 +82,7 @@ MAX_FLOW_RATES = {
     "gypsum_all_dataset_v2": 1.3,
     "gypsum_10_hole_dataset_v2": 4.6,
     "brickcladding_all_dataset_v2": 1.5686,
-    "hardyboard_all_dataset_v2": 1.58645,
+    "hardyboard_all_dataset_v2": 2.0 #1.58645,
 }
 MAX_FLOW_RATE = MAX_FLOW_RATES.get(EXPERIMENT_NAME, 5.0)
 
@@ -103,32 +103,32 @@ NORM_CONSTANTS = {
 #     'optimizer': 'Adam',
 # }
 # BRICKCLADDING ALL
-INITIAL_PARAMS = {  #hyperparam tuned
-    "lr": 0.00010386262010394423,
-    "weight_decay": 3.0503844758115838e-05,
-    "dropout_rate": 0.297074888861393,
-    "lstm_hidden_size": 256,
-    "lstm_layers": 2,
-    "optimizer": "AdamW"
-}
+# INITIAL_PARAMS = {  #hyper param tuned
+#     'lr': 4.123414239637593e-05,
+#     'weight_decay': 0.00013330917640038713,
+#     'dropout_rate': 0.28496532993368257,
+#     'lstm_hidden_size': 128,
+#     'lstm_layers': 2,
+#     'optimizer': 'Adam',
+# }
 
 # HARDYBOARD
-# INITIAL_PARAMS = { #maksysm hyperparams
-#     'lr': 0.001,
-#     'weight_decay': 0.0001,
-#     'dropout_rate': 0.3,
-#     'lstm_hidden_size': 256, 
-#     'lstm_layers': 3,
-#     'optimizer': 'AdamW'
-# }
-INITIAL_PARAMS = {  # tuned hyperparams
-    'lr': 9.365848987187114e-05,
-    'weight_decay': 2.6103804428607636e-05,
-    'dropout_rate': 0.11326216866883788,
-    'lstm_hidden_size': 128,
-    'lstm_layers': 1,
-    'optimizer': 'AdamW',
+INITIAL_PARAMS = {  #makysm
+    'lr': 0.001,     #0.0005         # Increased from ~9e-5
+    'weight_decay': 0.0001,    # Matched colleague
+    'dropout_rate': 0.3,       # Matched colleague
+    'lstm_hidden_size': 256,   # Increased from 128
+    'lstm_layers': 3,          # Increased from 1
+    'optimizer': 'AdamW'
 }
+# INITIAL_PARAMS = {  #hp-tuned
+# 'lr': 0.0004927189971320724, 
+# 'weight_decay': 0.00033078280364781817, 
+# 'dropout_rate': 0.14928276589823092, 
+# 'lstm_hidden_size': 128, 
+# 'lstm_layers': 3, 
+# 'optimizer': 'AdamW', 
+# }
 
 
 # This dictionary is needed by the data creation script to find the raw files.
@@ -140,9 +140,9 @@ DATASET_CONFIGS = {
    
     #"gypsum_0903": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_09032025_10holes_noshutter_Sameem"},
    
-    "brick_cladding_0616": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0616_2025_noshutter"},
-    "brick_cladding_0805": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0805_2025_noshutter"},
-    "brick_cladding_0808": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0808_2025_noshutter"},
-    # "hardyboard_0813": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_08132025_2holes_noshutter"},
-    # "hardyboard_0313": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_03132025"}, # OLD
+    # "brick_cladding_0616": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0616_2025_noshutter"},
+    # "brick_cladding_0805": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0805_2025_noshutter"},
+    # "brick_cladding_0808": {"material": "brick_cladding", "dataset_subfolder": "Fluke_BrickCladding_2holes_0808_2025_noshutter"},
+    "hardyboard_0813": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_08132025_2holes_noshutter"},
+    "hardyboard_0313": {"material": "hardyboard", "dataset_subfolder": "Fluke_HardyBoard_03132025"}, # OLD
 }
