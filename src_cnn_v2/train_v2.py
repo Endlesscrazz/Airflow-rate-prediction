@@ -165,14 +165,14 @@ def main():
         dropout=cfg.INITIAL_PARAMS['dropout_rate']
     ).to(cfg.DEVICE)
 
-    #over_pred_penalty = 2.5 #hardybaord maksym
-    #over_pred_penalty = 2.1 #brickcladding maksym
-    over_pred_penalty = 1.7 #gypsum
+    #over_pred_penalty = 2.4240489108946286 #2.1 #brickcladding maksym
+    over_pred_penalty = 2.483764369247002 #2.5 #hardyboard maksym
+    #over_pred_penalty = 0.8 #gypsum makysm
     criterion = lambda preds, targets: asymmetric_loss(preds, targets, over_prediction_penalty=over_pred_penalty)
 
     optimizer = optim.AdamW(model.parameters(), lr=cfg.INITIAL_PARAMS['lr'], weight_decay=cfg.INITIAL_PARAMS['weight_decay'])
     
-    # Scheduler: Patience=5 (Matches Colleague)
+    # Scheduler: Patience=5 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.3, patience=5)
     
     scaler_amp = torch.amp.GradScaler('cuda')
@@ -181,7 +181,7 @@ def main():
     history = []
     best_val_mae = float('inf')
     epochs_no_improve = 0
-    patience = 50 # Early stopping patience
+    patience = 30 # Early stopping patience
 
     for epoch in range(cfg.NUM_EPOCHS):
         train_loss, train_mae = train_one_epoch(model, train_loader, criterion, optimizer, cfg.DEVICE, scaler_amp)

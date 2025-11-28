@@ -97,7 +97,7 @@ def objective(trial: optuna.Trial):
         'lstm_hidden_size': trial.suggest_categorical('lstm_hidden_size', [128, 256]),
         'lstm_layers': trial.suggest_int('lstm_layers', 1, 3),
         'optimizer': trial.suggest_categorical('optimizer', ['Adam', 'AdamW']),
-        'over_prediction_penalty': trial.suggest_float('over_prediction_penalty', 1.0, 1.8)
+        'over_prediction_penalty': trial.suggest_float('over_prediction_penalty', 1.0, 3.0)
     }
 
     # 2. Load Data
