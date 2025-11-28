@@ -64,6 +64,7 @@ visualizations/
 plots/
 debug_masks/
 hotspot_masks/
+debug_outputs/
 
 # --- Logs ---
 # Ignore log files and SLURM output files.
