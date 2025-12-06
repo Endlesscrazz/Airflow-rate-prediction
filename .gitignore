@@ -1,6 +1,9 @@
 # =================================
 # General Python & System Files
 # =================================
+# Ignore the new virtual environment folder
+airflow_v3/
+
 # Compiled Python files
 __pycache__/
 *.pyc
@@ -30,8 +33,11 @@ datasets/
 cnn_dataset-old/
 masks_raw/
 CNN_dataset/
+CNN_dataset_v3/
 
 output_SAM/
+Output_SAM_V3/
+Output_CNN-LSTM_V3/
 debug_outputs/
 stabilization_poc_output/
 debug_stabilized_outputs/
@@ -73,6 +79,8 @@ logs/
 *.out
 leak_logs/
 hyperparam-logs/
+logs_v3/
+hyperparm-logs_v3/
 # --- Specific Generated Files ---
 master_features.csv
 
