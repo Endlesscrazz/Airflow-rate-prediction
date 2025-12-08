@@ -48,6 +48,7 @@ comparison_output/
 
 # --- Large Model Checkpoints ---
 SAM/
+FastSAM-s.pt
 
 # =================================
 # Experiment Outputs & Artifacts

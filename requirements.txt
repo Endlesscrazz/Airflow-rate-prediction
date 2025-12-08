@@ -1,16 +1,31 @@
-# Python version: 3.9.23
-joblib==1.4.2
-matplotlib==3.9.2
-numpy==2.0.1
-opencv-contrib-python==4.11.0.86
-opencv-python==4.11.0.86
-optuna==4.4.0
-pandas==2.2.3
-scikit-learn==1.6.1
-scipy==1.13.1
-seaborn==0.13.2
-segment-anything==1.0
-torch==2.7.1
-torchvision==0.22.1
-tqdm==4.67.1
-xgboost==2.1.4
+# --- Core Data Science ---
+numpy
+pandas
+scipy
+matplotlib
+seaborn
+tqdm
+joblib
+scikit-learn
+scikit-image
+
+# --- Deep Learning (PyTorch) ---
+# On Mac, pip will automatically grab the MPS-enabled version if available
+torch
+torchvision
+
+# --- Computer Vision ---
+# We use headless to be safe for Streamlit/Servers. 
+# If you run debug scripts locally, plots will show inline or save to disk.
+opencv-python-headless
+
+# --- Segmentation Models ---
+# Standard SAM (Used in your V3 pipeline)
+git+https://github.com/facebookresearch/segment-anything.git
+
+# FastSAM (For real-time app optimization later)
+ultralytics
+
+# --- Web App Framework ---
+streamlit
+watchdog  # Makes Streamlit auto-reload faster on Mac

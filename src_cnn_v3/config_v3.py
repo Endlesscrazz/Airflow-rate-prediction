@@ -3,7 +3,13 @@ import os
 import torch
 
 # --- Core Settings ---
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+if torch.cuda.is_available():
+    DEVICE = "cuda"       # For CHPC / Colab
+elif torch.backends.mps.is_available():
+    DEVICE = "mps"        # For Mac (Metal Performance Shaders) - Fast!
+else:
+    DEVICE = "cpu"        # Fallback
+    
 RANDOM_STATE = 42
 
 # --- Experiment Settings ---
