@@ -13,8 +13,8 @@ else:
 RANDOM_STATE = 42
 
 # --- Experiment Settings ---
-EXPERIMENT_NAME = "gypsum-10-hole_v3_hybrid"
-EXPERIMENT_VERSION = "v3_iter2_32x32_features_ON"
+EXPERIMENT_NAME = "gypsum_combined_v3"
+EXPERIMENT_VERSION = "v3_iter1_32x32_features_ON"
 
 # --- V3 Specifics ---
 RESIZE_DIM = (32, 32)
@@ -35,8 +35,11 @@ INITIAL_PARAMS = {
 # --- Target Normalization ---
 # We normalize airflow targets to [0, 1] during training
 MAX_FLOW_RATES = {
+    "gypsum_combined_v3": 25.0,
     "gypsum-10-hole_v3_hybrid": 24.2645,
-    # Can Add others as needed
+    # "gypsum_all_dataset_v2": 1.3,
+    # "brickcladding_all_dataset_v2": 1.5686,
+    # "hardyboard_all_dataset_v2": 2.0 #1.58645 ,
 }
 # Default to 10.0 if not found, preventing division by zero errors
 MAX_FLOW_RATE = MAX_FLOW_RATES.get(EXPERIMENT_NAME, 25.0)
@@ -64,7 +67,7 @@ INTERMEDIATE_DATA_DIR = os.path.join(PROJECT_ROOT, "Output_SAM_V3", "datasets")
 
 OUTPUT_DIR = os.path.join(DATA_DIR, EXPERIMENT_NAME)
 EXPERIMENT_RESULTS_DIR = os.path.join(RESULTS_DIR, EXPERIMENT_NAME, EXPERIMENT_VERSION)
-GROUND_TRUTH_CSV_PATH = os.path.join(PROJECT_ROOT, "airflow_ground_truth_gypsum_10holes.csv")
+GROUND_TRUTH_CSV_PATH = os.path.join(PROJECT_ROOT, "airflow_ground_truth_gypsum_combined.csv")
 MASTER_METADATA_PATH = os.path.join(OUTPUT_DIR, "master_metadata_v3.csv")
 
 # --- SPLIT PATHS ---
@@ -85,17 +88,31 @@ GYPSUM_10HOLE_TEMPLATE = {
 
 # --- DATASET CONFIGS ---
 DATASET_CONFIGS = {
+    # 1. The 10-Hole (Requires Template)
     "gypsum_10holes_0903": {
         "material": "gypsum", 
         "dataset_subfolder": "Fluke_Gypsum_09032025_10holes_noshutter_Sameem",
-        "num_leaks": 10,  
+        "num_leaks": 10,
         "template": GYPSUM_10HOLE_TEMPLATE 
     },
-    # Example for other datasets:
-    # "hardyboard_0813": {
-    #     "material": "hardyboard", 
-    #     "dataset_subfolder": "Fluke_HardyBoard_08132025_2holes_noshutter",
-    #     "num_leaks": 2,
-    #     "template": None
-    # }
+    # 2. The Single/Double Hole Datasets (No Template needed)
+    "gypsum_0716": {
+        "material": "gypsum", 
+        "dataset_subfolder": "Fluke_Gypsum_07162025_noshutter",
+        "num_leaks": 1, 
+        "template": None # Auto-detect top 1
+    },
+    "gypsum_0725": {
+        "material": "gypsum", 
+        "dataset_subfolder": "Fluke_Gypsum_07252025_noshutter",
+        "num_leaks": 1,
+        "template": None
+    },
+    "gypsum_0729": {
+        "material": "gypsum", 
+        "dataset_subfolder": "Fluke_Gypsum_07292025_noshutter",
+        "num_leaks": 1,
+        "template": None
+    },
+    # ... add others as needed
 }

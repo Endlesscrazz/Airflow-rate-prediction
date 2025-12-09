@@ -7,10 +7,12 @@ import sys
 
 # --- Parsing Helper Functions ---
 
+
 def parse_voltage_from_new_filename(filename: str) -> float:
     """Extracts voltage (e.g., T1.4V) from filename."""
     match = re.search(r'T(\d+(\.\d+)?)V', filename)
     return float(match.group(1)) if match else None
+
 
 def parse_delta_T_from_new_filename(filename: str) -> float:
     """Extracts delta_T from filename like ..._20_34_14_.mat (14 is deltaT)."""
@@ -23,9 +25,11 @@ def parse_delta_T_from_new_filename(filename: str) -> float:
         return None
     return None
 
+
 def parse_voltage_from_old_foldername(foldername: str) -> float:
     match = re.search(r'(\d+(\.\d+)?)V', foldername)
     return float(match.group(1)) if match else None
+
 
 def parse_delta_T_from_old_filename(filename: str) -> float:
     parts = filename.replace('.mat', '').split('_')
@@ -37,6 +41,7 @@ def parse_delta_T_from_old_filename(filename: str) -> float:
                 continue
     return None
 
+
 def parse_delta_T_10hole(filename: str) -> float:
     """
     Parses delta_T for the 10-hole dataset.
@@ -44,7 +49,8 @@ def parse_delta_T_10hole(filename: str) -> float:
     Example: ..._23_35_12_.mat -> returns 12.0
     """
     clean_name = filename.replace('.mat', '')
-    if clean_name.endswith('_'): clean_name = clean_name[:-1]
+    if clean_name.endswith('_'):
+        clean_name = clean_name[:-1]
     parts = clean_name.split('_')
     try:
         # Return the last number
@@ -52,16 +58,18 @@ def parse_delta_T_10hole(filename: str) -> float:
     except:
         return None
 
+
 def main():
     # --- PATH CONFIGURATION ---
     # Update this to match your environment
-    DATASETS_ROOT = "/scratch/general/vast/u1527145/datasets"
-    # DATASETS_ROOT = "/Volumes/One_Touch/Airflow-rate-prediction/datasets" # Local debugging
+   # DATASETS_ROOT = "/scratch/general/vast/u1527145/datasets"
+    DATASETS_ROOT = "/Volumes/One_Touch/Airflow-rate-prediction/datasets" # Local debugging
 
     # This output file will be used by create_metadata_v3.py
-    OUTPUT_CSV_PATH = "airflow_ground_truth_gypsum_10holes.csv"
+    OUTPUT_CSV_PATH = "airflow_ground_truth_gypsum_combined.csv"
 
     DATASET_CONFIGS = {
+    ## GYPSUM DATASET ALL
         # --- NEW 10-HOLE DATASET ---
         "gypsum_10holes_0903": {
             "material": "gypsum",
@@ -70,10 +78,29 @@ def main():
             "gt_file": "flow_rates.txt",
             "session": "gypsum_10hole"
         },
-        
-        # --- OLDER DATASETS (Comment out if not needed for this run) ---
-        # "gypsum_0716": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_07162025_noshutter", "structure_type": "new", "gt_file": "flow_rate.txt", "session": "gypsum_new"},
-        # "gypsum_0307": {"material": "gypsum", "dataset_subfolder": "Fluke_Gypsum_03072025", "structure_type": "old", "gt_file": "flow_rates.xlsx", "session": "gypsum_old"},
+        # --- OLDER DATASETS ---
+        "gypsum_0716": {
+            "material": "gypsum", 
+            "dataset_subfolder": "Fluke_Gypsum_07162025_noshutter", 
+            "structure_type": "new", # Voltage based filenames
+            "gt_file": "flow_rate.txt", 
+            "session": "gypsum_new"
+        },
+        "gypsum_0725": {
+            "material": "gypsum", 
+            "dataset_subfolder": "Fluke_Gypsum_07252025_noshutter", 
+            "structure_type": "new", 
+            "gt_file": "flow_rate.txt", 
+            "session": "gypsum_new"
+        },
+        "gypsum_0729": {
+            "material": "gypsum", 
+            "dataset_subfolder": "Fluke_Gypsum_07292025_noshutter", 
+            "structure_type": "new", 
+            "gt_file": "flow_rate.txt", 
+            "session": "gypsum_new"
+        },
+        # Add any others (e.g. 0307) if you have them and they are Gypsum
     }
 
     all_records = []
@@ -101,49 +128,55 @@ def main():
                 if not os.path.exists(gt_path):
                     print(f"  - Error: GT file not found: {gt_path}")
                     continue
-                
+
                 # specific parser for the 10hole format
-                gt_df = pd.read_csv(gt_path, sep=r'\s+', skiprows=1, header=None)
-                
+                gt_df = pd.read_csv(gt_path, sep=r'\s+',
+                                    skiprows=1, header=None)
+
                 # 2. Iterate through Pressure Subfolders (2P, 5P, etc.)
-                subdirs = [d for d in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, d))]
-                
+                subdirs = [d for d in os.listdir(folder_path) if os.path.isdir(
+                    os.path.join(folder_path, d))]
+
                 count_for_dataset = 0
                 for subdir in subdirs:
-                    if not subdir.endswith('P'): continue # Skip unrelated folders
-                    
+                    if not subdir.endswith('P'):
+                        continue  # Skip unrelated folders
+
                     try:
-                        pressure_val = int(subdir[:-1]) # "2P" -> 2
+                        pressure_val = int(subdir[:-1])  # "2P" -> 2
                     except ValueError:
                         continue
-                        
+
                     # 3. Find GT Row for this pressure
                     # Check column 0 for pressure value
                     gt_row = gt_df[gt_df.iloc[:, 0] == pressure_val]
                     if gt_row.empty:
-                        print(f"  - Warning: No flow rate data found for Pressure {pressure_val}P")
+                        print(
+                            f"  - Warning: No flow rate data found for Pressure {pressure_val}P")
                         continue
-                    
+
                     # Extract rates for Holes 1-10 (Columns 1 through 10)
                     rates = gt_row.iloc[0, 1:11].values
-                    
+
                     # 4. Process all video files in this pressure folder
                     pressure_dir = os.path.join(folder_path, subdir)
-                    mat_files = [f for f in os.listdir(pressure_dir) if f.endswith('.mat') and not f.startswith('._')]
-                    
+                    mat_files = [f for f in os.listdir(pressure_dir) if f.endswith(
+                        '.mat') and not f.startswith('._')]
+
                     for f in mat_files:
                         video_id = f.replace('.mat', '')
                         delta_T = parse_delta_T_10hole(f)
-                        
+
                         if delta_T is None:
-                            print(f"  - Warning: Could not parse delta_T from {f}")
+                            print(
+                                f"  - Warning: Could not parse delta_T from {f}")
                             continue
-                            
+
                         # Create 10 entries for this single video (one for each hole)
                         for i in range(10):
                             hole_num = i + 1
                             flow_rate = rates[i]
-                            
+
                             all_records.append({
                                 'video_id': video_id,
                                 'hole_id': str(hole_num),
@@ -155,8 +188,9 @@ def main():
                                 'source_dataset_key': config_key
                             })
                             count_for_dataset += 1
-                
-                print(f"  - Added {count_for_dataset} records from {config_key}")
+
+                print(
+                    f"  - Added {count_for_dataset} records from {config_key}")
 
             # ==========================================
             # BACKWARD COMPATIBILITY FOR V2 SCRIPTS
@@ -168,34 +202,44 @@ def main():
                     gt_df.columns = ['V', 'Pa', 'rate_single']
                 else:
                     # Assume standard CSV/Txt
-                    is_two_holes = "2holes" in config['dataset_subfolder'].lower()
+                    is_two_holes = "2holes" in config['dataset_subfolder'].lower(
+                    )
                     if is_two_holes:
-                        gt_df = pd.read_csv(gt_path, sep=r'\s+', header=None, skiprows=1, names=['V', 'Pa', 'rate_1', 'rate_2'])
+                        gt_df = pd.read_csv(
+                            gt_path, sep=r'\s+', header=None, skiprows=1, names=['V', 'Pa', 'rate_1', 'rate_2'])
                     else:
-                        gt_df = pd.read_csv(gt_path, sep=r'\s+', header=None, skiprows=1, names=['V', 'Pa', 'rate_single'])
-                
+                        gt_df = pd.read_csv(
+                            gt_path, sep=r'\s+', header=None, skiprows=1, names=['V', 'Pa', 'rate_single'])
+
                 gt_df['V'] = gt_df['V'].astype(float)
-                
+
                 # Walk through folders
                 count_for_dataset = 0
                 for subfolder_path, _, files in os.walk(folder_path):
-                    video_files = [f for f in files if f.endswith('.mat') and not f.startswith('._')]
+                    video_files = [f for f in files if f.endswith(
+                        '.mat') and not f.startswith('._')]
                     for filename in video_files:
                         video_id = filename.replace('.mat', '')
-                        
+
                         # Parse Voltage/DT
                         voltage = parse_voltage_from_new_filename(filename)
-                        if voltage is None: voltage = parse_voltage_from_old_foldername(os.path.basename(subfolder_path))
-                        
+                        if voltage is None:
+                            voltage = parse_voltage_from_old_foldername(
+                                os.path.basename(subfolder_path))
+
                         delta_T = parse_delta_T_from_new_filename(filename)
-                        if delta_T is None: delta_T = parse_delta_T_from_old_filename(filename)
-                        
-                        if voltage is None: continue
-                        
+                        if delta_T is None:
+                            delta_T = parse_delta_T_from_old_filename(filename)
+
+                        if voltage is None:
+                            continue
+
                         # Match GT
-                        gt_row = gt_df[np.isclose(gt_df['V'], voltage, atol=0.01)]
-                        if gt_row.empty: continue
-                        
+                        gt_row = gt_df[np.isclose(
+                            gt_df['V'], voltage, atol=0.01)]
+                        if gt_row.empty:
+                            continue
+
                         base_rec = {
                             'video_id': video_id,
                             'delta_T': delta_T,
@@ -204,17 +248,21 @@ def main():
                             'session': config['session'],
                             'source_dataset_key': config_key
                         }
-                        
+
                         # Add records
                         if "2holes" in config['dataset_subfolder'].lower():
-                            all_records.append({**base_rec, 'hole_id': '1', 'airflow_rate': gt_row.iloc[0]['rate_1']})
-                            all_records.append({**base_rec, 'hole_id': '2', 'airflow_rate': gt_row.iloc[0]['rate_2']})
+                            all_records.append(
+                                {**base_rec, 'hole_id': '1', 'airflow_rate': gt_row.iloc[0]['rate_1']})
+                            all_records.append(
+                                {**base_rec, 'hole_id': '2', 'airflow_rate': gt_row.iloc[0]['rate_2']})
                             count_for_dataset += 2
                         else:
-                            all_records.append({**base_rec, 'hole_id': '1', 'airflow_rate': gt_row.iloc[0]['rate_single']})
+                            all_records.append(
+                                {**base_rec, 'hole_id': '1', 'airflow_rate': gt_row.iloc[0]['rate_single']})
                             count_for_dataset += 1
-                
-                print(f"  - Added {count_for_dataset} records from {config_key}")
+
+                print(
+                    f"  - Added {count_for_dataset} records from {config_key}")
 
         except Exception as e:
             print(f"  - ERROR processing {config_key}: {e}")
@@ -228,7 +276,7 @@ def main():
         cols_to_sort = ['session', 'pressure_Pa', 'delta_T', 'hole_id']
         # Filter strictly for columns that exist
         cols_to_sort = [c for c in cols_to_sort if c in final_df.columns]
-        
+
         final_df = final_df.sort_values(by=cols_to_sort)
         final_df.to_csv(OUTPUT_CSV_PATH, index=False)
         print(f"\nSUCCESS: Ground Truth file saved to: {OUTPUT_CSV_PATH}")
@@ -238,5 +286,8 @@ def main():
     else:
         print("\nFAILURE: No records were generated.")
 
+
 if __name__ == "__main__":
     main()
+
+# python scripts_v3/create_ground_truth_labels.py
