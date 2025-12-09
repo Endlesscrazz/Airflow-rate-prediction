@@ -15,6 +15,7 @@ from src_cnn_v3 import config_v3 as cfg
 def validate_geometry(hole_id, features):
     """
     Quality Assurance: Returns False if the detected shape is physically impossible.
+    This function is needed for our training data of 10 holes, this may not be needed in the future
     """
     ar = features['aspect_ratio']
     area = features['area_px']
@@ -28,12 +29,6 @@ def validate_geometry(hole_id, features):
     if hole_id in [1, 10]:
         if ar < 1.8: # Threshold: Length must be at least 1.8x width
             return False
-            
-    # 3. Circle Checks (Holes 2-9)
-    # These should be roughly square/circular. If AR is huge, it's a streak artifact.
-    # (Optional, usually less critical)
-    # if hole_id in [2,3,4,5,6,7,8,9]:
-    #     if ar > 3.0: return False
         
     return True
 

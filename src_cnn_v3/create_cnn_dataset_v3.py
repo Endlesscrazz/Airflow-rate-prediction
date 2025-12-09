@@ -33,7 +33,6 @@ def process_sample(row, output_dir, is_training, dataset_configs):
     metadata_entries = []
     
     # --- 1. IDENTIFY REQUIRED FILES ---
-    # We define what we NEED to exist
     required_files = []
     
     # Original is always required
@@ -52,7 +51,7 @@ def process_sample(row, output_dir, is_training, dataset_configs):
                 'idx': i
             })
 
-    # --- 2. CHECK WHAT IS MISSING ---
+    # --- 2. CHECK FOR MISSING FILES ---
     missing_files = [f for f in required_files if not os.path.exists(f['path'])]
     
     # --- 3. FAST PATH: EVERYTHING EXISTS ---
@@ -66,7 +65,6 @@ def process_sample(row, output_dir, is_training, dataset_configs):
         return metadata_entries
 
     # --- 4. SLOW PATH: GENERATE MISSING ---
-    # Only load the video if we actually have work to do
     
     # Locate Video
     source_key = row['source_dataset_key']
@@ -124,7 +122,6 @@ def process_sample(row, output_dir, is_training, dataset_configs):
         else:
             # Generate specific augmentation
             # Use deterministic seeding based on sample_id + index for reproducibility
-            # (Optional, but good practice. Here using random for variation)
             jit_center = (row['obb_center_x'] + random.uniform(-2, 2), 
                           row['obb_center_y'] + random.uniform(-2, 2))
             jit_angle = row['obb_angle'] + random.uniform(-5, 5)

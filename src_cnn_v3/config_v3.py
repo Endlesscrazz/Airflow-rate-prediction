@@ -6,7 +6,7 @@ import torch
 if torch.cuda.is_available():
     DEVICE = "cuda"       # For CHPC / Colab
 elif torch.backends.mps.is_available():
-    DEVICE = "mps"        # For Mac (Metal Performance Shaders) - Fast!
+    DEVICE = "mps"        # For Mac (Metal Performance Shaders)
 else:
     DEVICE = "cpu"        # Fallback
     
@@ -36,7 +36,7 @@ INITIAL_PARAMS = {
 # We normalize airflow targets to [0, 1] during training
 MAX_FLOW_RATES = {
     "gypsum-10-hole_v3_hybrid": 24.2645,
-    # Add others as needed
+    # Can Add others as needed
 }
 # Default to 10.0 if not found, preventing division by zero errors
 MAX_FLOW_RATE = MAX_FLOW_RATES.get(EXPERIMENT_NAME, 25.0)
@@ -88,8 +88,8 @@ DATASET_CONFIGS = {
     "gypsum_10holes_0903": {
         "material": "gypsum", 
         "dataset_subfolder": "Fluke_Gypsum_09032025_10holes_noshutter_Sameem",
-        "num_leaks": 10,  # <--- Explicitly defined
-        "template": GYPSUM_10HOLE_TEMPLATE # <--- Explicitly defined
+        "num_leaks": 10,  
+        "template": GYPSUM_10HOLE_TEMPLATE 
     },
     # Example for other datasets:
     # "hardyboard_0813": {

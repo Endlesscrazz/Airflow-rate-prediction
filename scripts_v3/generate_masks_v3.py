@@ -96,7 +96,7 @@ def main():
 
     for d_key, d_conf in cfg.DATASET_CONFIGS.items():
         dataset_dir = os.path.join(cfg.RAW_DATASET_PARENT_DIR, d_conf["dataset_subfolder"])
-        # --- NEW: Get settings from config ---
+
         target_num_leaks = d_conf.get("num_leaks", 2)
         template = d_conf.get("template", None)
         

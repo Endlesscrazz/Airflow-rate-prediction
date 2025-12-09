@@ -159,7 +159,7 @@ def main():
                 print(f"  - Added {count_for_dataset} records from {config_key}")
 
             # ==========================================
-            # LOGIC FOR OLDER DATASETS (V2 Style)
+            # BACKWARD COMPATIBILITY FOR V2 SCRIPTS
             # ==========================================
             else:
                 # Load GT file (Excel or CSV)
