@@ -61,7 +61,7 @@ Open src_cnn_v3/config_v3.py.
 Define your templates (coordinates of leaks).
 Update DATASET_CONFIGS to include all datasets you want to train on.
 
-# config_v3.py example
+config_v3.py example
 GYPSUM_10HOLE_TEMPLATE = { 1: (145, 228), ... 10: (353, 414) }
 HARDYBOARD_2HOLE_TEMPLATE = { 1: (322, 328), 2: (130, 499) }
 
@@ -142,33 +142,6 @@ Runs the model on the held-out Test Set and generates detailed reports (Scatter 
 ```
 python -m src_cnn_v3.predict_v3
 ```
-
-## Strategy: Combining Datasets (Multi-Material Training)
-To improve model robustness, we can combine data from different materials (e.g., Gypsum and Hardyboard) into a single "Universal" or "Pre-trained" model.
-
-1. Unified Ground Truth
-Ensure scripts/create_ground_truth_labels.py iterates over both dataset configs.
-
-code
-Python
-DATASET_CONFIGS = {
-    "gypsum": { ... },
-    "hardyboard": { ... }
-}
-This produces a single CSV with a material column.
-
-2. Unified Config
-In src_cnn_v3/config_v3.py, ensure DATASET_CONFIGS includes both entries with their respective Templates.
-
-3. Normalization Strategy
-Different materials have different thermal properties.
-
-Input Normalization: Instance Normalization (enabled in preprocessing.py) handles the contrast differences between materials automatically.
-Target Normalization:
-Option A (Separate Heads): Not currently implemented.
-Option B (Global Max): Set MAX_FLOW_RATE in config to the highest flow rate observed across ALL datasets (e.g., 25.0 for Gypsum). The model will learn that Hardyboard simply has lower values within that range.
-4. Training
-Run the standard training script. The StratifiedGroupKFold will automatically ensure that both Gypsum and Hardyboard videos are distributed across Train/Val/Test sets, allowing the model to learn generalized physics features (like "Slit vs Circle") that apply to both materials.
 
 ## Dependencies
 Core: numpy, pandas, scipy, matplotlib
