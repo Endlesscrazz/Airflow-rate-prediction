@@ -3,9 +3,6 @@ import numpy as np
 import cv2
 
 class OnlineOLSCalculator:
-    """
-    Lightweight OLS for Real-Time Visualization (CPU Optimized).
-    """
     def __init__(self, H, W):
         self.H, self.W = H, W
         self.n = 0
@@ -39,39 +36,38 @@ class OnlineOLSCalculator:
 def generate_live_heatmap(frame, ols_calc):
     """
     Updates OLS and returns a blended image mimicking the Fused Signal Map style.
-    (Clean Black background, Glowing Red/Orange hotspots)
+    Uses COLORMAP_INFERNO (Black -> Purple -> Orange -> Yellow)
     """
     ols_calc.add_frame(frame)
     slope_map = ols_calc.calculate_slope_map()
     
+    # Prepare original frame (Grayscale -> RGB)
+    frame_norm = cv2.normalize(frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+    frame_rgb = cv2.cvtColor(frame_norm, cv2.COLOR_GRAY2RGB)
+    
     if slope_map.max() > 0:
-        # 1. Enhance Contrast to make peaks pop
+        # 1. Contrast Enhance (Power 1.3 to suppress noise)
         map_enhanced = slope_map ** 1.3
         
-        # 2. Threshold: Clip bottom 20% to Black to remove blue background noise
+        # 2. Thresholding: Clip bottom 15% to pure black
+        # This prevents the "Blue/Gray Haze" on the background
         vmin = map_enhanced.min()
         vmax = map_enhanced.max()
-        threshold = vmin + 0.20 * (vmax - vmin)
+        threshold = vmin + 0.15 * (vmax - vmin)
         map_enhanced[map_enhanced < threshold] = 0
         
-        # 3. Apply Colormap (INFERNO looks closest to "Heat")
+        # 3. Apply INFERNO Colormap (Matches your Training Maps)
         map_norm = cv2.normalize(map_enhanced, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         heatmap = cv2.applyColorMap(map_norm, cv2.COLORMAP_INFERNO)
         
-        # 4. Create Mask: Only blend where the heatmap is actually hot
-        # This keeps the background looking like the original video (Grayscale)
-        mask = map_norm > 15 # Binary mask of hot spots
-        
-        # Prepare original frame (Grayscale -> RGB)
-        frame_norm = cv2.normalize(frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        frame_rgb = cv2.cvtColor(frame_norm, cv2.COLOR_GRAY2RGB)
+        # 4. Masking
+        mask = map_norm > 10
         
         # 5. Blend
         out = frame_rgb.copy()
-        # Blend: 30% Video + 70% Heatmap (makes the leak glow strongly)
+        # High opacity for heatmap (0.8) to make it pop against the video
         out[mask] = cv2.addWeighted(frame_rgb[mask], 0.3, heatmap[mask], 0.7, 0)
         
         return out
     else:
-        frame_norm = cv2.normalize(frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        return cv2.cvtColor(frame_norm, cv2.COLOR_GRAY2RGB)
+        return frame_rgb
