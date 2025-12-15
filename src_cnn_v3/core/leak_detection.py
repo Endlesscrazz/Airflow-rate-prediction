@@ -30,30 +30,33 @@ class FusedSignalDetector:
         """
         Generates the Fused Score Map: Temporal Trend * (Local Z-Score ^ power).
         """
-        # Ensure frames are float64 for precision (matches V2)
+        # Ensure frames are float64 for precision
         frames = frames.astype(np.float64)
         H, W, T = frames.shape
         
+        # --- PREPROCESSING (The Missing Link) ---
+        # Normalize each frame by its spatial mean to handle ambient fluctuations
+        # This matches src_cnn_v2/find_leaking_holes.py logic
+        frame_means = frames.mean(axis=(0, 1), keepdims=True) # Shape (1, 1, T)
+        frame_means[frame_means < 1e-6] = 1.0
+        norm_frames = frames / frame_means
+        
         # --- 1. Calculate Temporal Trend Map (Theil-Sen) ---
-        # Note: We work on RAW frames now, matching V2 debug script.
-        # We REMOVED normalization (frames / mean) and smoothing to match V2 success.
         t = np.arange(T)
         results = Parallel(n_jobs=-1)(
-            delayed(self._calculate_slope_row)(frames[r, :, :], t) 
+            delayed(self._calculate_slope_row)(norm_frames[r, :, :], t) 
             for r in range(H)
         )
         temporal_map = np.vstack(results)
         temporal_map = np.maximum(temporal_map, 0.0) 
 
         # --- 2. Calculate Spatial Heat Z-Score ---
-        # Calculate mean image across time
-        temp_mean = np.mean(frames, axis=2)
+        # Use Normalized frames for Z-Score too (V2 logic)
+        temp_mean = np.mean(norm_frames, axis=2)
         
-        # Calculate Local Z-Score using Gaussian Blur (Vectorized, Fast)
-        # Matches V2 logic exactly
+        # Calculate Local Z-Score
         loc_mu = cv2.GaussianBlur(temp_mean, (31, 31), 0)
         temp_mean_sq = cv2.GaussianBlur(temp_mean**2, (31, 31), 0)
-        # Variance = E[X^2] - (E[X])^2
         sigma_sq = np.maximum(temp_mean_sq - loc_mu**2, 0)
         loc_sd = np.sqrt(sigma_sq) + 1e-9
         
@@ -62,7 +65,7 @@ class FusedSignalDetector:
         # --- 3. Fuse ---
         score_map = temporal_map * (heat_z ** self.heat_power)
         
-        # Clean up borders (often noisy artifacts from Gaussian Blur)
+        # Clean up borders
         border = 10
         score_map[:border, :] = 0
         score_map[-border:, :] = 0
@@ -74,10 +77,9 @@ class FusedSignalDetector:
     def find_peaks(self, score_map, min_distance=30):
         """
         Finds leak coordinates.
-        Matches V2 logic: Threshold is 5% of max.
+        Matches V2: Threshold is 5% of max.
         """
         global_max = score_map.max()
-        # V2 uses 0.05 relative threshold
         threshold_abs = global_max * 0.05 
         
         coords = peak_local_max(score_map, min_distance=min_distance, threshold_abs=threshold_abs)

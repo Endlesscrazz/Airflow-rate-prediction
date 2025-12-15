@@ -96,24 +96,34 @@ def main():
 
     for d_key, d_conf in cfg.DATASET_CONFIGS.items():
         dataset_dir = os.path.join(cfg.RAW_DATASET_PARENT_DIR, d_conf["dataset_subfolder"])
-
         target_num_leaks = d_conf.get("num_leaks", 2)
         template = d_conf.get("template", None)
         
-        print(f"\nProcessing: {d_key} | Expecting {target_num_leaks} leaks")
+        print(f"\nProcessing Dataset: {d_key}")
+        print(f"  - Folder: {d_conf['dataset_subfolder']}")
+        print(f"  - Target Leaks: {target_num_leaks}")
         
         mat_files = glob.glob(os.path.join(dataset_dir, "**", "*.mat"), recursive=True)
         
-        for mat_path in tqdm(mat_files):
+        # --- COUNTERS FOR LOGGING ---
+        skipped_count = 0
+        processed_count = 0
+        error_count = 0
+        
+        for mat_path in tqdm(mat_files, desc=f"  - {d_key}"):
             try:
                 video_id = os.path.splitext(os.path.basename(mat_path))[0]
                 rel_path = os.path.relpath(os.path.dirname(mat_path), dataset_dir)
                 out_dir = os.path.join(cfg.INTERMEDIATE_DATA_DIR, d_conf["dataset_subfolder"], rel_path, video_id)
                 os.makedirs(out_dir, exist_ok=True)
                 
+                # --- CHECK IF EXISTS ---
                 json_path = os.path.join(out_dir, f"{video_id}_features.json")
-                if os.path.exists(json_path): continue
+                if os.path.exists(json_path): 
+                    skipped_count += 1
+                    continue
 
+                # --- IF NOT EXISTS, PROCESS ---
                 frames = scipy.io.loadmat(mat_path)['TempFrames'].astype(np.float32)
                 
                 # A. Detect Peaks (Find everything)
@@ -130,7 +140,9 @@ def main():
                     for i, c in enumerate(final_candidates):
                         c['hole_id'] = i + 1
                 
-                if not final_candidates: continue
+                if not final_candidates: 
+                    # Consider logging empty detections if needed
+                    continue
 
                 # C. SAM Prep
                 avg_frame = frames.mean(axis=2)
@@ -182,9 +194,19 @@ def main():
                 plt.savefig(os.path.join(out_dir, f"{video_id}_verification.png"))
                 plt.close()
                 
+                processed_count += 1
+                
             except Exception as e:
                 print(f"Error processing {mat_path}: {e}")
+                error_count += 1
                 continue
+        
+        # --- DATASET SUMMARY LOG ---
+        print(f"  -> SUMMARY for {d_key}:")
+        print(f"     - Existing/Skipped: {skipped_count}")
+        print(f"     - Processed New:    {processed_count}")
+        print(f"     - Errors:           {error_count}")
+        print("-" * 40)
 
 if __name__ == "__main__":
     main()

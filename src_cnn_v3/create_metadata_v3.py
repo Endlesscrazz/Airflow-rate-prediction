@@ -12,10 +12,10 @@ sys.path.insert(0, project_root)
 
 from src_cnn_v3 import config_v3 as cfg
 
-def validate_geometry(hole_id, features):
+def validate_geometry(hole_id, features, source_key):
     """
     Quality Assurance: Returns False if the detected shape is physically impossible.
-    This function is needed for our training data of 10 holes, this may not be needed in the future
+    Now context-aware based on the dataset type.
     """
     ar = features['aspect_ratio']
     area = features['area_px']
@@ -24,12 +24,13 @@ def validate_geometry(hole_id, features):
     if area < 20: 
         return False
         
-    # 2. Slit Checks (Hole 1 and 10)
-    # These should be long and thin. If AR is close to 1.0, it's just a blob/fragment.
-    if hole_id in [1, 10]:
-        if ar < 1.8: # Threshold: Length must be at least 1.8x width
-            return False
-        
+    # 2. Slit Checks (ONLY for the 10-hole dataset)
+    # The single-hole datasets (gypsum_0716 etc) have circular Hole 1s.
+    if "10holes" in source_key:
+        if hole_id in [1, 10]:
+            if ar < 1.8: # Threshold: Length must be at least 1.8x width
+                return False
+                
     return True
 
 def main():
@@ -77,11 +78,11 @@ def main():
             if hole_id in feat_map:
                 feat = feat_map[hole_id]
                 
-                # --- APPLY QA CHECK ---
-                if not validate_geometry(hole_id, feat):
+                # --- APPLY QA CHECK (Updated with source_key) ---
+                if not validate_geometry(hole_id, feat, source_key):
                     skipped_counts["qa_fail"] += 1
-                    # Optional: Print info about rejected sample
-                    print(f"Rejecting {video_id} Hole {hole_id}: AR={feat['aspect_ratio']:.2f}")
+                    # Optional: Print info about rejected sample (Commented out to reduce noise)
+                    # print(f"Rejecting {video_id} Hole {hole_id}: AR={feat['aspect_ratio']:.2f}")
                     continue
                 
                 merged_record = row.to_dict()

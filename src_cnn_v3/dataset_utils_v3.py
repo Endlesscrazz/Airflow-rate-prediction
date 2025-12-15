@@ -34,8 +34,21 @@ class HybridDataset(Dataset):
         npy_path = os.path.join(self.dataset_dir, row['file_path'])
         video_data = np.load(npy_path).astype(np.float32)
         
+        # --- FIX: PAD SEQUENCE TO FIXED LENGTH ---
+        current_len = video_data.shape[0]
+        target_len = cfg.NUM_FRAMES_PER_SAMPLE
+        
+        if current_len < target_len:
+            # Pad with zeros at the end
+            pad_len = target_len - current_len
+            # video_data shape is (Time, H, W)
+            padding = np.zeros((pad_len, video_data.shape[1], video_data.shape[2]), dtype=np.float32)
+            video_data = np.concatenate([video_data, padding], axis=0)
+        elif current_len > target_len:
+            # Trim if too long (shouldn't happen with current creation script, but safe)
+            video_data = video_data[:target_len]
+            
         # 2. Instance Normalization (On-the-Fly)
-        # Scales current clip to [0, 1] relative to ITSELF
         if cfg.V3_PREPROCESS_PARAMS['ENABLE_INSTANCE_NORM']:
             v_min, v_max = video_data.min(), video_data.max()
             if v_max - v_min > 1e-6:
@@ -43,14 +56,20 @@ class HybridDataset(Dataset):
             else:
                 video_data = np.zeros_like(video_data)
 
-        # 3. Channel Dimension
-        video_tensor = torch.from_numpy(video_data).unsqueeze(1) 
+        # 3. Channel Dimension -> (Time, 1, H, W) for Conv3d or similar
+        # Note: Your model expects (B, T, C, H, W) during forward, so here we return (T, 1, H, W)
+        # But wait, your current model processes 2D frames in a loop or uses (B*T, C, H, W).
+        # Let's stick to the shape your model expects. 
+        # In `models_v3.py`, you reshape: `c_in = video.view(B * T, C, H, W)`
+        # This implies input `video` should be `(B, T, C, H, W)`.
+        # So `__getitem__` should return `(T, C, H, W)`.
+        
+        video_tensor = torch.from_numpy(video_data).unsqueeze(1) # (T, 1, H, W)
         
         # 4. Tabular Features
         feat_vec = torch.tensor(self.features_scaled[idx], dtype=torch.float32)
         
-        # 5. Target Scaling (NEW)
-        # Normalize target to [0, 1] range for stable gradients
+        # 5. Target Scaling
         raw_airflow = row['airflow_rate']
         scaled_target = raw_airflow / cfg.MAX_FLOW_RATE
         target = torch.tensor(scaled_target, dtype=torch.float32)
