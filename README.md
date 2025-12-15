@@ -3,19 +3,24 @@
 **Deep Learning Pipeline & Real-Time Visualization Dashboard**  
 **Status:** Prototype (V3) | **Tech Stack:** PyTorch, Streamlit, OpenCV, SAM (Segment Anything)
 
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/web-app-demo1.mp4" width="100%" controls autoplay loop muted></video>
+  <br>
+  <em>(Note: If video does not play, please download it from the assets folder)</em>
+</div>
+
 ThermalFlow AI is a deep learning system designed to automate building energy audits. By ingesting raw radiometric thermal video, the system identifies air leakage points and—crucially—quantifies the airflow rate (L/min) and estimates financial loss without the need for manual interpretation.
 
 ---
 
 ## Key Innovation: The "Two-Stream" Architecture
 
-Unlike traditional black-box AI, ThermalFlow utilizes a **Two-Stream Asynchronous Architecture** to bridge the gap between heavy Deep Learning models and real-time User Experience:
+Unlike traditional black-box AI, ThermalFlow utilizes a **Two-Stream Asynchronous Architecture** to bridge the gap between heavy Deep Learning models and real-time User Experience.
 
-**Foreground Stream (CPU):**  
-Runs an Online OLS (Ordinary Least Squares) algorithm to render a Live Heatmap instantaneously (30 FPS). This mimics the experience of using a physical thermal camera, allowing auditors to see leaks develop in real-time.
+![Pipeline Architecture](assets/pipeline_architecture.png)
 
-**Background Stream (GPU):**  
-Runs the heavy V3 Inference Pipeline (Signal Detection + SAM Segmentation + CNN-LSTM) silently in the background to perform precise quantification.
+1.  **Foreground Stream (CPU):** Runs an Online OLS (Ordinary Least Squares) algorithm to render a Live Heatmap instantaneously (30 FPS). This mimics the experience of using a physical thermal camera.
+2.  **Background Stream (GPU):** Runs the heavy V3 Inference Pipeline (Signal Detection + SAM Segmentation + CNN-LSTM) silently in the background.
 
 ---
 
@@ -26,19 +31,13 @@ The project has evolved through rigorous experimentation, moving from basic regr
 | Version | Methodology | Performance (R²) | Limitation |
 |------|-----------|------------------|------------|
 | V1 | Handcrafted Features (Optical Flow) | < 0.30 | Failed to capture temporal dynamics. |
-| V2 | Fixed-Crop CNN-LSTM | ≈ 0.52 | Struggled with non-circular leaks (slits) and noise. |
-| **V3 (Current)** | **Hybrid Shape-Aware (SAM + OBB)** | **0.86 – 0.89** | **Solved! Robust to geometry and texture.** |
+| V2 | Fixed-Crop CNN-LSTM | ≈ 0.52 | Struggled with non-circular leaks (slits). |
+| **V3** | **Hybrid Shape-Aware (SAM + OBB)** | **0.86 – 0.89** | **Robust to geometry and texture.** |
 
 ### V3 Results by Material
-
-- **Gypsum Board (10-Hole):**  
-  R² = 0.863 | MAE = 0.078 L/min
-
-- **Brick Cladding:**  
-  R² = 0.892 | MAE = 0.117 L/min
-
-- **HardyBoard:**  
-  R² = 0.855 | MAE = 0.119 L/min
+- **Gypsum Board (10-Hole):** R² = 0.863 | MAE = 0.078 L/min
+- **Brick Cladding:** R² = 0.892 | MAE = 0.117 L/min
+- **HardyBoard:** R² = 0.855 | MAE = 0.119 L/min
 
 ---
 
@@ -46,19 +45,10 @@ The project has evolved through rigorous experimentation, moving from basic regr
 
 The core logic (`src_cnn_v3`) follows a physics-informed computer vision pipeline:
 
-**Fused Signal Detection:**  
-Combines Temporal Trends (Theil-Sen Slope) and Spatial Heat (Local Z-Score) to create a high-contrast map, detecting anomalies invisible to the naked eye.
-
-**Smart Localization:**  
-Uses Adaptive Thresholding to detect leaks without knowing the count beforehand, merging proximity peaks to handle complex shapes (e.g., vertical slits).
-
-**Segmentation (SAM):**  
-Utilizes the Segment Anything Model with dynamic box prompting to generate precise binary masks.
-
-**Hybrid Quantification:**
-- **Visual Stream:** A CNN-LSTM network processes the raw thermal video stack (150 frames).
-- **Geometric Stream:** An MLP processes handcrafted features (Area, Aspect Ratio, Extent, Pressure).
-- **Fusion:** Both streams are combined to predict the scalar flow rate.
+1.  **Fused Signal Detection:** Combines Temporal Trends and Spatial Heat to detect invisible anomalies.
+2.  **Smart Localization:** Uses Adaptive Thresholding to detect leaks without knowing the count beforehand.
+3.  **Segmentation (SAM):** Utilizes **Segment Anything** with dynamic box prompting to generate precise masks.
+4.  **Hybrid Quantification:** Combines Visual Features (CNN-LSTM) with Geometric Features (Area, Aspect Ratio) to predict flow.
 
 ---
 
@@ -66,19 +56,21 @@ Utilizes the Segment Anything Model with dynamic box prompting to generate preci
 
 The repository includes a fully functional Streamlit application (`web_app/`) for demonstration.
 
-### Features
+### 1. Live Visualization & Quantification
+Real-time "Hot" heatmap visualization followed by precise AI overlays (Green OBB) and financial cost estimation.
 
-- **Live Site Analysis:** Real-time visualization of developing thermal anomalies using `COLORMAP_HOT`.
-- **AI Quantification:** Overlays precise Green Oriented Bounding Boxes (OBB) on detected leaks.
-- **Financial Metrics:** Estimates annual financial loss ($/yr) based on total leakage.
-- **Explainability:** Toggleable "Fused Signal Map" to verify AI attention regions.
+![Final Quantification UI](assets/final_quantification.png)
+
+### 2. Explainability (Fused Signal Map)
+Users can toggle the internal "Fused Signal Map" (Purple/Orange) to verify exactly which pixels the AI identified as thermal anomalies vs. background noise.
+
+![Fused Signal Map](assets/fused_signal_map.jpg)
 
 ---
 
 ## Running the App Locally
 
 ### Requirements
-
 - Python 3.10+
 - GPU Recommended (NVIDIA CUDA or Mac M1/M2 MPS)
 
@@ -97,7 +89,6 @@ pip install -r requirements.txt
 # 4. Run Streamlit App
 streamlit run web_app/app.py
 ```
-
 ---
 
 ## Project Structure
