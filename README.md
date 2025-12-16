@@ -9,7 +9,7 @@
   <em>(Note: If video does not play, please download it from the assets folder)</em>
 </div>
 
-ThermalFlow AI is a deep learning system designed to automate building energy audits. By ingesting raw radiometric thermal video, the system identifies air leakage points and—crucially—quantifies the airflow rate (L/min) and estimates financial loss without the need for manual interpretation.
+ThermalFlow AI is a deep learning system designed to automate building energy audits. By ingesting raw radiometric thermal video, the system identifies air leakage points and quantifies the airflow rate (L/min) and estimates financial loss without the need for manual interpretation.
 
 ---
 
